@@ -4,14 +4,11 @@ import requests
 import re
 import logging
 from pathlib import Path
-from config.settings import DATA_RAW
+from config.settings import DATA_RAW, ENSO_BOLETIN_URLS
 
 logger = logging.getLogger(__name__)
 
-# URLs de boletines agroclimáticos IDEAM (agregar URLs reales al descargar)
-BOLETIN_URLS = [
-    # Ejemplo: "https://www.ideam.gov.co/.../boletin_agroclimatico_2024_T1.pdf",
-]
+BOLETIN_URLS = ENSO_BOLETIN_URLS
 
 REGIONES = ["Andina", "Caribe", "Pacífico", "Orinoquía", "Amazonía"]
 
@@ -43,16 +40,37 @@ def extract_boletin_pdf(pdf_path: Path, trimestre: str, anio: int) -> pd.DataFra
                                 "region":      region,
                                 "fase_enso":   _parse_fase_enso(row_text),
                                 "indice_spi":  spi,
+                                "anomalia_precipitacion_pct": None,
+                                "probabilidad_deficit_hidrico": None,
+                                "probabilidad_exceso_hidrico": None,
                                 "texto_raw":   row_text[:300],
                             })
     return pd.DataFrame(registros)
+
+
+def _infer_periodo(filename: str) -> tuple[int, str]:
+    patterns = [
+        r"(?P<anio>\d{4})[_-]?T(?P<trimestre>[1-4])",
+        r"(?P<anio>\d{4}).*trimestre[_ -]?(?P<trimestre>[1-4])",
+        r"trimestre[_ -]?(?P<trimestre>[1-4]).*(?P<anio>\d{4})",
+    ]
+    lower_name = filename.lower()
+    for pattern in patterns:
+        match = re.search(pattern, lower_name)
+        if match:
+            anio = int(match.group("anio"))
+            trimestre = f"T{match.group('trimestre')}"
+            return anio, trimestre
+    return 0, "T0"
 
 def extract_all_boletines() -> pd.DataFrame:
     """Descarga y procesa todos los PDFs configurados."""
     pdf_dir = DATA_RAW / "boletines_pdf"
     pdf_dir.mkdir(exist_ok=True)
     all_dfs = []
-    for url in BOLETIN_URLS:
+
+    urls = list(BOLETIN_URLS)
+    for url in urls:
         filename = url.rstrip("/").split("/")[-1]
         local = pdf_dir / filename
         if not local.exists():
@@ -60,14 +78,17 @@ def extract_all_boletines() -> pd.DataFrame:
             r = requests.get(url, timeout=60)
             r.raise_for_status()
             local.write_bytes(r.content)
-        # Extraer año y trimestre del nombre del archivo
-        match = re.search(r"(\d{4})_T(\d)", filename)
-        if match:
-            anio, trimestre = int(match.group(1)), f"T{match.group(2)}"
-        else:
-            anio, trimestre = 0, "T0"
+        anio, trimestre = _infer_periodo(filename)
         df = extract_boletin_pdf(local, trimestre, anio)
         all_dfs.append(df)
+
+    for local in sorted(pdf_dir.glob("*.pdf")):
+        if urls and local.name in {url.rstrip("/").split("/")[-1] for url in urls}:
+            continue
+        anio, trimestre = _infer_periodo(local.name)
+        df = extract_boletin_pdf(local, trimestre, anio)
+        all_dfs.append(df)
+
     result = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
     out = DATA_RAW / "enso_boletines_raw.csv"
     result.to_csv(out, index=False)

@@ -8,9 +8,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_RAW = BASE_DIR / "data" / "raw"
 DATA_PROCESSED = BASE_DIR / "data" / "processed"
 LOGS_DIR = BASE_DIR / "logs"
+MANUAL_DATA_DIR = DATA_RAW / "manual"
 
 # Crear carpetas si no existen
-for d in [DATA_RAW, DATA_PROCESSED, LOGS_DIR]:
+for d in [DATA_RAW, DATA_PROCESSED, LOGS_DIR, MANUAL_DATA_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 DB = {
@@ -51,3 +52,12 @@ CLIMA_YEAR_START = 2020
 
 # Regiones naturales (orden fijo = id_region)
 REGIONES_NATURALES = ["Andina", "Caribe", "Pacífico", "Orinoquía", "Amazonía"]
+
+
+def _split_env_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+ENSO_BOLETIN_URLS = _split_env_list(os.getenv("ENSO_BOLETIN_URLS"))

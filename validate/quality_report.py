@@ -1,6 +1,7 @@
 import pandas as pd
 import logging
 from sqlalchemy import text
+from config.settings import CLIMA_YEAR_START, YEAR_END
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,68 @@ CHECKS = [
         "sql": "SELECT COUNT(*) AS pct FROM model_version WHERE activo = TRUE",
         "umbral_max": 1,
         "mensaje": "Número de modelos activos en producción (debe ser ≤ 1)",
+    },
+    {
+        "nombre": "estaciones_sin_municipio",
+        "sql": """
+            SELECT COUNT(*) FILTER (WHERE id_municipio IS NULL)::FLOAT
+            / NULLIF(COUNT(*), 0) * 100 AS pct
+            FROM dim_estacion_ideam
+        """,
+        "umbral_max": 5,
+        "mensaje": "% estaciones IDEAM sin municipio asignado",
+    },
+    {
+        "nombre": "duplicados_clima_mensual",
+        "sql": """
+            SELECT COALESCE(SUM(duplicados), 0)::FLOAT AS pct
+            FROM (
+                SELECT GREATEST(COUNT(*) - 1, 0) AS duplicados
+                FROM fact_clima_mensual
+                GROUP BY id_estacion, id_tiempo
+            ) t
+        """,
+        "umbral_max": 0,
+        "mensaje": "Duplicados en fact_clima_mensual por (id_estacion, id_tiempo)",
+    },
+    {
+        "nombre": "cobertura_temporal_clima_anios",
+        "sql": """
+            SELECT COUNT(DISTINCT dt.anio)::FLOAT AS pct
+            FROM fact_clima_mensual fc
+            JOIN dim_tiempo dt ON dt.id_tiempo = fc.id_tiempo
+        """,
+        "umbral_min": max(1, YEAR_END - CLIMA_YEAR_START + 1),
+        "mensaje": "Años distintos cubiertos por fact_clima_mensual",
+    },
+    {
+        "nombre": "trimestres_enso_faltantes",
+        "sql": """
+            WITH fact_count AS (
+                SELECT COUNT(*) AS total FROM fact_alerta_enso
+            ),
+            periodos AS (
+                SELECT DISTINCT anio, trimestre
+                FROM dim_tiempo
+                WHERE anio BETWEEN 2007 AND 2025
+            ),
+            enso AS (
+                SELECT DISTINCT dt.anio, dt.trimestre
+                FROM fact_alerta_enso fe
+                JOIN dim_tiempo dt ON dt.id_tiempo = fe.id_tiempo
+            )
+            SELECT CASE
+                WHEN (SELECT total FROM fact_count) = 0 THEN NULL
+                ELSE (
+                    SELECT COUNT(*)::FLOAT
+                    FROM periodos p
+                    LEFT JOIN enso e ON e.anio = p.anio AND e.trimestre = p.trimestre
+                    WHERE e.anio IS NULL
+                )
+            END AS pct
+        """,
+        "umbral_max": 0,
+        "mensaje": "Trimestres faltantes en fact_alerta_enso",
     },
 ]
 

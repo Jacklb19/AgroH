@@ -22,16 +22,19 @@ logging.basicConfig(
 logger = logging.getLogger("pipeline")
 
 
-def run_etl():
+def run_core_etl(engine=None):
     logger.info("=" * 60)
-    logger.info(f"INICIO ETL — {datetime.now().isoformat()}")
+    logger.info(f"INICIO ETL CORE — {datetime.now().isoformat()}")
     logger.info("=" * 60)
 
     from extract.extract_divipola    import extract_divipola
     from extract.extract_produccion  import extract_produccion
-    from extract.extract_ideam_pdf   import extract_all_boletines
 
-    from clean.clean_municipios      import agregar_id_municipio
+    from clean.clean_municipios      import (
+        agregar_id_municipio,
+        asignar_estaciones_a_municipios,
+        build_region_map_from_divipola,
+    )
     from clean.clean_clima           import unificar_clima_mensual
 
     from load.db                     import get_engine, init_schema
@@ -43,7 +46,8 @@ def run_etl():
     from load.load_facts             import load_all_facts, load_fact_clima_mensual
     from validate.quality_report     import run_quality_report
 
-    engine = get_engine()
+    if engine is None:
+        engine = get_engine()
 
     # ── Paso 1: Schema ──────────────────────────
     logger.info("Paso 1: Inicializando schema...")
@@ -53,7 +57,6 @@ def run_etl():
     logger.info("Paso 2: Extrayendo fuentes...")
     df_divipola    = extract_divipola()
     df_produccion  = extract_produccion()
-    df_boletines   = extract_all_boletines()
 
     from extract.extract_ideam_estaciones import extract_estaciones
     df_estaciones = extract_estaciones()
@@ -65,7 +68,8 @@ def run_etl():
     logger.info("Paso 3: Cargando dimensiones...")
     load_dim_region_natural(engine)
     load_dim_tiempo(engine)
-    load_dim_municipio(engine, df_divipola, df_region_map=None)
+    df_region_map = build_region_map_from_divipola(df_divipola)
+    load_dim_municipio(engine, df_divipola, df_region_map=df_region_map)
     
     df_cultivos = df_produccion[["cultivo", "grupo_de_cultivo", "ciclo_de_cultivo"]].drop_duplicates()
     df_cultivos = df_cultivos.rename(columns={
@@ -86,7 +90,7 @@ def run_etl():
     # ── Paso 4: Limpieza y normalización ────────
     logger.info("Paso 4: Limpiando y normalizando...")
     df_produccion = agregar_id_municipio(df_produccion, col_nombre="municipio")
-    df_estaciones = agregar_id_municipio(df_estaciones, col_nombre="municipio")
+    df_estaciones = asignar_estaciones_a_municipios(df_estaciones, df_divipola, fallback_col="municipio")
     
     nulos = df_produccion["id_municipio"].isna().sum()
     if nulos > 0:
@@ -117,7 +121,7 @@ def run_etl():
 
     # ── Paso 5: Hechos de producción ─────────────
     logger.info("Paso 5: Cargando hechos de producción...")
-    load_all_facts(engine, df_produccion, df_boletines)
+    load_all_facts(engine, df_produccion, pd.DataFrame())
 
     # ── Paso 6: Hechos climáticos ────────────────
     logger.info("Paso 6: Unificando clima a granularidad mensual...")
@@ -136,24 +140,103 @@ def run_etl():
     else:
         logger.info("Todos los indicadores de calidad en estado OK")
 
-    logger.info(f"FIN ETL — {datetime.now().isoformat()}")
+    logger.info(f"FIN ETL CORE — {datetime.now().isoformat()}")
     logger.info("=" * 60)
+    return {
+        "df_divipola": df_divipola,
+        "df_produccion": df_produccion,
+        "df_estaciones": df_estaciones,
+        "df_clima_mensual": df_clima_mensual,
+        "quality_report": reporte,
+    }
+
+
+def run_extended_etl(engine=None):
+    logger.info("INICIO ETL EXTENDIDO — %s", datetime.now().isoformat())
+
+    from load.db import get_engine
+    from extract.extract_ideam_pdf import extract_all_boletines
+    from extract.extract_sipsa import extract_sipsa
+    from extract.extract_sipra import extract_sipra
+    from clean.clean_precios import normalizar_precios_sipsa, construir_dim_centrales
+    from clean.clean_suelo import resumir_aptitud_suelo_por_municipio, load_censo_agropecuario_local
+    from load.load_dimensions import load_dim_central_abastos
+    from load.load_facts import (
+        load_fact_alerta_enso,
+        load_fact_precios_mayoristas,
+        load_fact_aptitud_suelo,
+        load_fact_censo_agropecuario,
+    )
+    from extract.extract_divipola import extract_divipola
+
+    if engine is None:
+        engine = get_engine()
+
+    df_boletines = extract_all_boletines()
+    if not df_boletines.empty:
+        load_fact_alerta_enso(engine, df_boletines)
+    else:
+        logger.info("ENSO: sin boletines configurados o detectados")
+
+    df_sipsa_raw = extract_sipsa()
+    df_precios = normalizar_precios_sipsa(df_sipsa_raw)
+    if not df_precios.empty:
+        df_centrales = construir_dim_centrales(df_precios)
+        if not df_centrales.empty:
+            load_dim_central_abastos(engine, df_centrales)
+        load_fact_precios_mayoristas(engine, df_precios)
+    else:
+        logger.info("SIPSA: sin archivos manuales configurados")
+
+    df_divipola = extract_divipola()
+    df_sipra = extract_sipra()
+    df_suelo = resumir_aptitud_suelo_por_municipio(df_sipra, df_divipola)
+    if not df_suelo.empty:
+        load_fact_aptitud_suelo(engine, df_suelo)
+    else:
+        logger.info("SIPRA: sin capas suficientes para generar fact_aptitud_suelo")
+
+    df_censo = load_censo_agropecuario_local()
+    if not df_censo.empty:
+        load_fact_censo_agropecuario(engine, df_censo)
+    else:
+        logger.info("CNA: sin archivo manual configurado")
+
+    logger.info("FIN ETL EXTENDIDO — %s", datetime.now().isoformat())
+
+
+def run_etl(mode: str = "all"):
+    from load.db import get_engine
+
+    engine = get_engine()
+    result = None
+    if mode in {"core", "all"}:
+        result = run_core_etl(engine=engine)
+    if mode in {"extended", "all"}:
+        run_extended_etl(engine=engine)
+    return result
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true",
                         help="Ejecutar el pipeline una sola vez y salir")
+    parser.add_argument(
+        "--mode",
+        choices=["core", "extended", "all"],
+        default="all",
+        help="Selecciona qué parte del pipeline ejecutar",
+    )
     args = parser.parse_args()
 
     if args.once:
-        run_etl()
+        run_etl(mode=args.mode)
     else:
         from apscheduler.schedulers.blocking import BlockingScheduler
         scheduler = BlockingScheduler(timezone="America/Bogota")
         # Ejecutar todos los lunes a las 2 AM (hora Colombia)
-        scheduler.add_job(run_etl, "cron", day_of_week="mon", hour=2, minute=0)
-        logger.info("Scheduler activo — pipeline programado los lunes a las 02:00 (Bogotá)")
+        scheduler.add_job(run_etl, "cron", day_of_week="mon", hour=2, minute=0, kwargs={"mode": "core"})
+        logger.info("Scheduler activo — pipeline CORE programado los lunes a las 02:00 (Bogotá)")
         logger.info("Ctrl+C para detener")
         try:
             scheduler.start()
