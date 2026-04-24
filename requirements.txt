@@ -1,0 +1,13 @@
+requests
+sodapy
+pandas
+numpy
+geopandas
+fiona
+shapely
+pyarrow
+pdfplumber
+psycopg2-binary
+sqlalchemy
+python-dotenv
+apscheduler
