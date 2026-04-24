@@ -10,7 +10,6 @@ import requests
 import pandas as pd
 import logging
 import time
-from pathlib import Path
 from config.settings import SOURCES, DATA_RAW, CLIMA_YEAR_START, YEAR_END
 
 logger = logging.getLogger(__name__)
@@ -19,37 +18,50 @@ TIMEOUT = 120
 MAX_RETRIES = 3
 
 
-def _download_aggregated(url: str, variable_name: str, agg_func: str,
-                         anio_start: int, anio_end: int,
-                         limit: int = 50000) -> pd.DataFrame:
+def _download_aggregated(
+    url: str,
+    variable_name: str,
+    anio_start: int,
+    anio_end: int,
+    include_sensor: bool = True,
+    limit: int = 50000,
+) -> pd.DataFrame:
     """
     Descarga datos ya agregados por mes desde Socrata usando SoQL.
     
     Args:
         url: endpoint Socrata
         variable_name: nombre descriptivo ('precipitacion', 'temperatura')
-        agg_func: 'sum' para precipitación, 'avg' para temperatura
         anio_start: año inicial
         anio_end: año final (inclusive)
+        include_sensor: agrega descripcionsensor al resultado si existe en la fuente
         limit: registros por página
     """
     rows = []
     offset = 0
 
-    select_clause = (
-        "codigoestacion,"
-        "descripcionsensor,"
-        "date_extract_y(fechaobservacion) as anio,"
-        "date_extract_m(fechaobservacion) as mes,"
-        f"{agg_func}(valorobservado) as valor_agregado,"
-        "count(*) as num_lecturas"
-    )
-    group_clause = (
-        "codigoestacion,"
-        "descripcionsensor,"
-        "date_extract_y(fechaobservacion),"
-        "date_extract_m(fechaobservacion)"
-    )
+    select_cols = ["codigoestacion"]
+    group_cols = ["codigoestacion"]
+    if include_sensor:
+        select_cols.append("descripcionsensor")
+        group_cols.append("descripcionsensor")
+
+    select_cols.extend([
+        "date_extract_y(fechaobservacion) as anio",
+        "date_extract_m(fechaobservacion) as mes",
+        "sum(valorobservado) as total_valor",
+        "avg(valorobservado) as promedio_valor",
+        "max(valorobservado) as max_valor",
+        "min(valorobservado) as min_valor",
+        "count(*) as num_lecturas",
+    ])
+    group_cols.extend([
+        "date_extract_y(fechaobservacion)",
+        "date_extract_m(fechaobservacion)",
+    ])
+
+    select_clause = ",".join(select_cols)
+    group_clause = ",".join(group_cols)
     where_clause = (
         f"fechaobservacion >= '{anio_start}-01-01T00:00:00' "
         f"AND fechaobservacion < '{anio_end + 1}-01-01T00:00:00'"
@@ -115,7 +127,13 @@ def extract_precipitacion_mensual() -> pd.DataFrame:
             df_year = pd.read_parquet(cache)
         else:
             logger.info(f"  {anio}: consultando agregados en API...")
-            df_year = _download_aggregated(url, f"precipitacion_{anio}", "sum", anio, anio)
+            df_year = _download_aggregated(
+                url,
+                f"precipitacion_{anio}",
+                anio,
+                anio,
+                include_sensor=False,
+            )
             if not df_year.empty:
                 df_year.to_parquet(cache, index=False)
                 logger.info(f"  {anio}: {len(df_year)} registros agregados → {cache}")
@@ -148,7 +166,13 @@ def extract_clima_combinado_mensual() -> pd.DataFrame:
             df_year = pd.read_parquet(cache)
         else:
             logger.info(f"  {anio}: consultando agregados en API...")
-            df_year = _download_aggregated(url, f"clima_combinado_{anio}", "avg", anio, anio)
+            df_year = _download_aggregated(
+                url,
+                f"clima_combinado_{anio}",
+                anio,
+                anio,
+                include_sensor=True,
+            )
             if not df_year.empty:
                 df_year.to_parquet(cache, index=False)
                 logger.info(f"  {anio}: {len(df_year)} registros agregados → {cache}")

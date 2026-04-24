@@ -57,7 +57,23 @@ def load_dim_municipio(engine, df_divipola: pd.DataFrame, df_region_map: pd.Data
     df["latitud_centroide"] = df["latitud_centroide"].astype(str).str.replace(",", ".").replace("nan", "0").astype(float)
     df["longitud_centroide"] = df["longitud_centroide"].astype(str).str.replace(",", ".").replace("nan", "0").astype(float)
     if df_region_map is not None:
+        if "nombre_region" in df_region_map.columns and "id_region" not in df_region_map.columns:
+            dim_region_db = pd.read_sql(
+                "SELECT id_region, nombre_region FROM dim_region_natural",
+                engine,
+            )
+            df_region_map = df_region_map.merge(dim_region_db, on="nombre_region", how="left")
         df = df.merge(df_region_map, on="id_municipio", how="left")
+    expected_cols = [
+        "id_municipio",
+        "nombre_municipio",
+        "id_departamento",
+        "nombre_departamento",
+        "latitud_centroide",
+        "longitud_centroide",
+        "id_region",
+    ]
+    df = df[[col for col in expected_cols if col in df.columns]]
     upsert(engine, "dim_municipio", df, ["id_municipio"])
     logger.info(f"dim_municipio: {len(df)} municipios cargados")
 
