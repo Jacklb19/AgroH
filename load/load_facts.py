@@ -45,3 +45,61 @@ def load_all_facts(engine, df_produccion: pd.DataFrame, df_boletines: pd.DataFra
     # 4. Upsert a fact_produccion_agricola
     upsert(engine, "fact_produccion_agricola", df_fact, ["id_municipio", "id_cultivo", "id_tiempo"])
     logger.info(f"fact_produccion_agricola: {len(df_fact)} registros cargados")
+
+
+def load_fact_clima_mensual(engine, df_clima_mensual: pd.DataFrame):
+    """
+    Carga fact_clima_mensual cruzando con dim_tiempo y dim_estacion_ideam.
+    df_clima_mensual debe tener: id_estacion, anio, mes, precipitacion_mm, etc.
+    """
+    from .db import upsert
+
+    if df_clima_mensual.empty:
+        logger.warning("Sin datos climáticos mensuales para cargar")
+        return
+
+    logger.info(f"load_fact_clima_mensual: procesando {len(df_clima_mensual)} registros...")
+
+    # 1. Recuperar id_tiempo (fecha = primer día del mes)
+    dim_tiempo_db = pd.read_sql("SELECT id_tiempo, anio, mes FROM dim_tiempo", engine)
+
+    # 2. Recuperar estaciones con su id_municipio
+    dim_est_db = pd.read_sql(
+        "SELECT id_estacion, id_municipio FROM dim_estacion_ideam WHERE id_municipio IS NOT NULL",
+        engine
+    )
+
+    # 3. Join con dim_tiempo
+    df_clima_mensual["anio"] = df_clima_mensual["anio"].astype(int)
+    df_clima_mensual["mes"] = df_clima_mensual["mes"].astype(int)
+    df = df_clima_mensual.merge(dim_tiempo_db, on=["anio", "mes"], how="inner")
+
+    # 4. Join con dim_estacion_ideam para obtener id_municipio
+    df["id_estacion"] = df["id_estacion"].astype(str)
+    dim_est_db["id_estacion"] = dim_est_db["id_estacion"].astype(str)
+    df = df.merge(dim_est_db, on="id_estacion", how="inner")
+
+    # 5. Seleccionar columnas del schema
+    cols_fact = [
+        "id_estacion", "id_municipio", "id_tiempo",
+        "precipitacion_mm", "temperatura_media_c", "temperatura_max_c",
+        "temperatura_min_c", "humedad_relativa_pct", "brillo_solar_horas_dia"
+    ]
+    # Asegurar que existen todas las columnas (pueden faltar si no hubo datos de ese sensor)
+    for c in cols_fact:
+        if c not in df.columns:
+            df[c] = None
+
+    df_fact = df[cols_fact].copy()
+    df_fact = df_fact.dropna(subset=["id_estacion", "id_municipio", "id_tiempo"])
+
+    import numpy as np
+    df_fact = df_fact.replace({np.nan: None})
+
+    if df_fact.empty:
+        logger.warning("Tras filtrar, no quedan registros de clima para cargar")
+        return
+
+    logger.info(f"  Insertando {len(df_fact)} registros en fact_clima_mensual...")
+    upsert(engine, "fact_clima_mensual", df_fact, ["id_estacion", "id_tiempo"])
+    logger.info(f"fact_clima_mensual: {len(df_fact)} registros cargados")

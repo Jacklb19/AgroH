@@ -29,6 +29,10 @@ SOURCES = {
     "sipsa_mayoristas": "https://microdatos.dane.gov.co/index.php/catalog/776",
     # A08 — Catálogo estaciones IDEAM Socrata
     "estaciones_ideam": "https://www.datos.gov.co/resource/hp9r-jxuu.json",
+    # A09 — Precipitación IDEAM (cada 10 min)
+    "precipitacion_ideam": "https://www.datos.gov.co/resource/s54a-sgyg.json",
+    # A09b — Datos estaciones IDEAM y terceros (temperatura + variables combinadas)
+    "clima_combinado_ideam": "https://www.datos.gov.co/resource/57sv-p2fu.json",
     # A11 — SIPRA GeoJSON (aptitud suelo arroz ejemplo)
     "sipra_geojson": "https://sipra.upra.gov.co/geoserver/ows",
     # DIVIPOLA
@@ -38,9 +42,12 @@ SOURCES = {
 # Radio máximo join espacial clima-municipio (km)
 SPATIAL_JOIN_RADIUS_KM = 50
 
-# Período histórico
+# Período histórico producción
 YEAR_START = 2007
 YEAR_END   = 2025
+
+# Período histórico clima (más corto para descargas rápidas, ampliar después)
+CLIMA_YEAR_START = 2020
 
 # Regiones naturales (orden fijo = id_region)
 REGIONES_NATURALES = ["Andina", "Caribe", "Pacífico", "Orinoquía", "Amazonía"]

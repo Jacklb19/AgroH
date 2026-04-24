@@ -1,82 +1,94 @@
+"""
+clean_clima.py — Limpieza y unificación de datos climáticos IDEAM.
+
+Recibe DataFrames ya agregados a nivel mensual desde el extractor
+(que usa SoQL del servidor Socrata) y los unifica en un solo DataFrame
+alineado al schema de fact_clima_mensual.
+"""
 import pandas as pd
-import geopandas as gpd
 import numpy as np
 import logging
-from shapely.geometry import Point
-from config.settings import DATA_RAW, DATA_PROCESSED, SPATIAL_JOIN_RADIUS_KM
+from config.settings import DATA_PROCESSED
 
 logger = logging.getLogger(__name__)
 
-def agregar_clima_mensual(df_diario: pd.DataFrame) -> pd.DataFrame:
-    """
-    Agrega datos climáticos diarios del DHIME a granularidad mensual.
-    Precipitación: suma. Temperatura y humedad: promedio. Brillo solar: promedio.
-    """
-    df = df_diario.copy()
-    df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
-    df = df.dropna(subset=["fecha"])
-    df["anio"] = df["fecha"].dt.year
-    df["mes"]  = df["fecha"].dt.month
 
-    agg = df.groupby(["id_estacion", "anio", "mes"]).agg(
-        precipitacion_mm       = ("precipitacion_mm", "sum"),
-        temperatura_media_c    = ("temperatura_c", "mean"),
-        temperatura_max_c      = ("temperatura_max_c", "max"),
-        temperatura_min_c      = ("temperatura_min_c", "min"),
-        humedad_relativa_pct   = ("humedad_relativa_pct", "mean"),
-        brillo_solar_horas_dia = ("brillo_solar_horas", "mean"),
-    ).reset_index()
+def unificar_clima_mensual(df_precip: pd.DataFrame,
+                           df_combinado: pd.DataFrame) -> pd.DataFrame:
+    """
+    Unifica datos de precipitación y variables combinadas en un solo DataFrame
+    con las columnas del schema de fact_clima_mensual.
 
-    # Crear fecha = primer día del mes
-    agg["fecha_mes"] = pd.to_datetime(
-        agg["anio"].astype(str) + "-" + agg["mes"].astype(str).str.zfill(2) + "-01"
-    )
+    Ambos DataFrames vienen del extractor con columnas:
+      codigoestacion, anio, mes, valor_agregado, num_lecturas
+
+    Para precipitación: valor_agregado = suma mensual (mm)
+    Para combinado: valor_agregado = promedio mensual (°C, %, horas)
+    """
+    result_dfs = []
+
+    # --- Precipitación: ya viene como SUMA mensual ---
+    if not df_precip.empty:
+        df_p = df_precip.copy()
+        df_p = df_p.rename(columns={
+            "codigoestacion": "id_estacion",
+            "valor_agregado": "precipitacion_mm"
+        })
+        df_p["anio"] = pd.to_numeric(df_p["anio"], errors="coerce").astype("Int64")
+        df_p["mes"] = pd.to_numeric(df_p["mes"], errors="coerce").astype("Int64")
+        df_p["precipitacion_mm"] = pd.to_numeric(df_p["precipitacion_mm"], errors="coerce")
+        df_p = df_p[["id_estacion", "anio", "mes", "precipitacion_mm"]].dropna(
+            subset=["id_estacion", "anio", "mes"]
+        )
+        result_dfs.append(df_p)
+        logger.info(f"Precipitación mensual: {len(df_p)} registros")
+
+    # --- Clima combinado: ya viene como PROMEDIO mensual ---
+    # Este dataset mezcla variables (temperatura, humedad, etc.) diferenciadas por descripcionsensor.
+    if not df_combinado.empty:
+        df_c = df_combinado.copy()
+        df_c["variable"] = "otro"
+        sensor = df_c["descripcionsensor"].astype(str).str.lower()
+        df_c.loc[sensor.str.contains("temperatura|temp", na=False), "variable"] = "temperatura_media_c"
+        df_c.loc[sensor.str.contains("humedad", na=False), "variable"] = "humedad_relativa_pct"
+        df_c.loc[sensor.str.contains("brillo|solar|radiaci", na=False), "variable"] = "brillo_solar_horas_dia"
+        
+        # Solo tomamos lo que nos interesa
+        df_c = df_c[df_c["variable"] != "otro"]
+        
+        if not df_c.empty:
+            df_c_pivot = df_c.pivot_table(
+                index=["codigoestacion", "anio", "mes"],
+                columns="variable",
+                values="valor_agregado",
+                aggfunc="mean"
+            ).reset_index()
+            
+            df_c_pivot = df_c_pivot.rename(columns={"codigoestacion": "id_estacion"})
+            df_c_pivot["anio"] = pd.to_numeric(df_c_pivot["anio"], errors="coerce").astype("Int64")
+            df_c_pivot["mes"] = pd.to_numeric(df_c_pivot["mes"], errors="coerce").astype("Int64")
+            
+            # Limpiar nulos en llaves
+            df_c_pivot = df_c_pivot.dropna(subset=["id_estacion", "anio", "mes"])
+            result_dfs.append(df_c_pivot)
+            logger.info(f"Clima combinado mensual: {len(df_c_pivot)} registros unificados")
+
+    if not result_dfs:
+        logger.warning("Sin datos climáticos para unificar")
+        return pd.DataFrame()
+
+    # Unir precipitación + temperatura por estación/año/mes
+    if len(result_dfs) == 2:
+        result = result_dfs[0].merge(result_dfs[1], on=["id_estacion", "anio", "mes"], how="outer")
+    else:
+        result = result_dfs[0]
+
+    # Asegurar columnas del schema (rellenar con None las que no tenemos aún)
+    for col in ["temperatura_max_c", "temperatura_min_c", "humedad_relativa_pct", "brillo_solar_horas_dia"]:
+        if col not in result.columns:
+            result[col] = None
+
     out = DATA_PROCESSED / "clima_mensual.parquet"
-    agg.to_parquet(out, index=False)
-    logger.info(f"Clima mensual: {len(agg)} registros → {out}")
-    return agg
-
-
-def join_espacial_estacion_municipio(df_estaciones: pd.DataFrame,
-                                      df_municipios: pd.DataFrame) -> pd.DataFrame:
-    """
-    Para cada estación IDEAM calcula el municipio más cercano dentro de SPATIAL_JOIN_RADIUS_KM.
-    df_estaciones: columnas latitud, longitud, id_estacion
-    df_municipios: columnas latitud_centroide, longitud_centroide, id_municipio
-    Retorna df_estaciones con columna id_municipio añadida.
-    """
-    gdf_est = gpd.GeoDataFrame(
-        df_estaciones,
-        geometry=gpd.points_from_xy(df_estaciones["longitud"], df_estaciones["latitud"]),
-        crs="EPSG:4326"
-    ).to_crs("EPSG:3116")  # Colombia MAGNA-SIRGAS
-
-    gdf_mun = gpd.GeoDataFrame(
-        df_municipios,
-        geometry=gpd.points_from_xy(
-            df_municipios["longitud_centroide"],
-            df_municipios["latitud_centroide"]
-        ),
-        crs="EPSG:4326"
-    ).to_crs("EPSG:3116")
-
-    radio_m = SPATIAL_JOIN_RADIUS_KM * 1000
-    resultados = []
-    for _, est in gdf_est.iterrows():
-        distancias = gdf_mun.geometry.distance(est.geometry)
-        idx_min = distancias.idxmin()
-        dist_min = distancias[idx_min]
-        if dist_min <= radio_m:
-            id_mun = gdf_mun.loc[idx_min, "id_municipio"]
-        else:
-            id_mun = None
-            logger.debug(f"Estación {est['id_estacion']}: sin municipio en {SPATIAL_JOIN_RADIUS_KM}km")
-        resultados.append({"id_estacion": est["id_estacion"], "id_municipio": id_mun})
-
-    df_resultado = pd.DataFrame(resultados)
-    sin_cobertura = df_resultado["id_municipio"].isna().sum()
-    logger.info(
-        f"Join espacial: {len(df_resultado)} estaciones, "
-        f"{sin_cobertura} sin municipio dentro de {SPATIAL_JOIN_RADIUS_KM}km"
-    )
-    return df_estaciones.merge(df_resultado, on="id_estacion", how="left")
+    result.to_parquet(out, index=False)
+    logger.info(f"Clima mensual unificado: {len(result)} registros → {out}")
+    return result
