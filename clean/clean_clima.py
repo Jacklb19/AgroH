@@ -19,20 +19,20 @@ def unificar_clima_mensual(df_precip: pd.DataFrame,
     Unifica datos de precipitación y variables combinadas en un solo DataFrame
     con las columnas del schema de fact_clima_mensual.
 
-    Ambos DataFrames vienen del extractor con columnas:
-      codigoestacion, anio, mes, valor_agregado, num_lecturas
-
-    Para precipitación: valor_agregado = suma mensual (mm)
-    Para combinado: valor_agregado = promedio mensual (°C, %, horas)
+    Ambos DataFrames vienen del extractor con columnas explícitas:
+      codigoestacion, anio, mes, total_valor, promedio_valor,
+      max_valor, min_valor, num_lecturas
     """
     result_dfs = []
 
     # --- Precipitación: ya viene como SUMA mensual ---
     if not df_precip.empty:
         df_p = df_precip.copy()
+        if "total_valor" not in df_p.columns and "valor_agregado" in df_p.columns:
+            df_p["total_valor"] = df_p["valor_agregado"]
         df_p = df_p.rename(columns={
             "codigoestacion": "id_estacion",
-            "valor_agregado": "precipitacion_mm"
+            "total_valor": "precipitacion_mm"
         })
         df_p["anio"] = pd.to_numeric(df_p["anio"], errors="coerce").astype("Int64")
         df_p["mes"] = pd.to_numeric(df_p["mes"], errors="coerce").astype("Int64")
@@ -47,6 +47,12 @@ def unificar_clima_mensual(df_precip: pd.DataFrame,
     # Este dataset mezcla variables (temperatura, humedad, etc.) diferenciadas por descripcionsensor.
     if not df_combinado.empty:
         df_c = df_combinado.copy()
+        if "promedio_valor" not in df_c.columns and "valor_agregado" in df_c.columns:
+            df_c["promedio_valor"] = df_c["valor_agregado"]
+        if "max_valor" not in df_c.columns:
+            df_c["max_valor"] = df_c.get("promedio_valor")
+        if "min_valor" not in df_c.columns:
+            df_c["min_valor"] = df_c.get("promedio_valor")
         df_c["variable"] = "otro"
         sensor = df_c["descripcionsensor"].astype(str).str.lower()
         df_c.loc[sensor.str.contains("temperatura|temp", na=False), "variable"] = "temperatura_media_c"
@@ -60,11 +66,25 @@ def unificar_clima_mensual(df_precip: pd.DataFrame,
             df_c_pivot = df_c.pivot_table(
                 index=["codigoestacion", "anio", "mes"],
                 columns="variable",
-                values="valor_agregado",
-                aggfunc="mean"
+                values=["promedio_valor", "max_valor", "min_valor"],
+                aggfunc="mean",
             ).reset_index()
-            
-            df_c_pivot = df_c_pivot.rename(columns={"codigoestacion": "id_estacion"})
+
+            df_c_pivot.columns = [
+                "_".join([str(part) for part in col if part]).strip("_")
+                if isinstance(col, tuple) else col
+                for col in df_c_pivot.columns
+            ]
+
+            rename_cols = {
+                "codigoestacion": "id_estacion",
+                "promedio_valor_temperatura_media_c": "temperatura_media_c",
+                "max_valor_temperatura_media_c": "temperatura_max_c",
+                "min_valor_temperatura_media_c": "temperatura_min_c",
+                "promedio_valor_humedad_relativa_pct": "humedad_relativa_pct",
+                "promedio_valor_brillo_solar_horas_dia": "brillo_solar_horas_dia",
+            }
+            df_c_pivot = df_c_pivot.rename(columns=rename_cols)
             df_c_pivot["anio"] = pd.to_numeric(df_c_pivot["anio"], errors="coerce").astype("Int64")
             df_c_pivot["mes"] = pd.to_numeric(df_c_pivot["mes"], errors="coerce").astype("Int64")
             
@@ -84,7 +104,7 @@ def unificar_clima_mensual(df_precip: pd.DataFrame,
         result = result_dfs[0]
 
     # Asegurar columnas del schema (rellenar con None las que no tenemos aún)
-    for col in ["temperatura_max_c", "temperatura_min_c", "humedad_relativa_pct", "brillo_solar_horas_dia"]:
+    for col in ["temperatura_media_c", "temperatura_max_c", "temperatura_min_c", "humedad_relativa_pct", "brillo_solar_horas_dia"]:
         if col not in result.columns:
             result[col] = None
 

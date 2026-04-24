@@ -1,9 +1,46 @@
 import pandas as pd
+import numpy as np
 import unicodedata
 import logging
-from config.settings import DATA_RAW, BASE_DIR
+from config.settings import DATA_RAW, BASE_DIR, SPATIAL_JOIN_RADIUS_KM
 
 logger = logging.getLogger(__name__)
+
+DEPARTAMENTO_REGION = {
+    "05": "Andina",
+    "08": "Caribe",
+    "11": "Andina",
+    "13": "Caribe",
+    "15": "Andina",
+    "17": "Andina",
+    "18": "Amazonía",
+    "19": "Pacífico",
+    "20": "Caribe",
+    "23": "Caribe",
+    "25": "Andina",
+    "27": "Pacífico",
+    "41": "Andina",
+    "44": "Caribe",
+    "47": "Caribe",
+    "50": "Orinoquía",
+    "52": "Pacífico",
+    "54": "Andina",
+    "63": "Andina",
+    "66": "Andina",
+    "68": "Andina",
+    "70": "Caribe",
+    "73": "Andina",
+    "76": "Pacífico",
+    "81": "Orinoquía",
+    "85": "Orinoquía",
+    "86": "Amazonía",
+    "88": "Caribe",
+    "91": "Amazonía",
+    "94": "Amazonía",
+    "95": "Amazonía",
+    "97": "Amazonía",
+    "99": "Orinoquía",
+}
 
 def _normalizar_texto(s: str) -> str:
     """Minúsculas, sin tildes, sin paréntesis de departamento."""
@@ -14,6 +51,10 @@ def _normalizar_texto(s: str) -> str:
     s = unicodedata.normalize("NFD", s)
     s = "".join(c for c in s if unicodedata.category(c) != "Mn")
     return s
+
+
+def _to_float(series: pd.Series) -> pd.Series:
+    return pd.to_numeric(series.astype(str).str.replace(",", ".", regex=False), errors="coerce")
 
 def build_synonym_map() -> dict:
     """
@@ -71,4 +112,97 @@ def agregar_id_municipio(df: pd.DataFrame, col_nombre: str) -> pd.DataFrame:
     logger.info(f"Normalización municipios: {total - nulos}/{total} resueltos ({pct:.1f}% sin resolver)")
     if pct > 5:
         logger.warning(f"Más del 5% de municipios sin resolver — revisar synonyms_municipios.csv")
+    return df
+
+
+def build_region_map_from_divipola(df_divipola: pd.DataFrame) -> pd.DataFrame:
+    """Construye un mapeo municipio -> región natural usando el código de departamento."""
+    df = df_divipola.copy()
+    df["id_municipio"] = df["cod_mpio"].astype(str).str.zfill(5)
+    df["id_departamento"] = df["cod_dpto"].astype(str).str.zfill(2)
+    df["nombre_region"] = df["id_departamento"].map(DEPARTAMENTO_REGION)
+    return df[["id_municipio", "nombre_region"]].drop_duplicates()
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: np.ndarray, lon2: np.ndarray) -> np.ndarray:
+    lat1_rad = np.radians(lat1)
+    lon1_rad = np.radians(lon1)
+    lat2_rad = np.radians(lat2)
+    lon2_rad = np.radians(lon2)
+
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    a = (
+        np.sin(dlat / 2.0) ** 2
+        + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlon / 2.0) ** 2
+    )
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    return 6371.0 * c
+
+
+def asignar_estaciones_a_municipios(
+    df_estaciones: pd.DataFrame,
+    df_divipola: pd.DataFrame,
+    fallback_col: str = "municipio",
+    max_radius_km: float = SPATIAL_JOIN_RADIUS_KM,
+) -> pd.DataFrame:
+    """
+    Asigna cada estación al municipio más cercano usando coordenadas.
+    Si faltan coordenadas o no hay match confiable, usa el nombre del municipio como respaldo.
+    """
+    df = df_estaciones.copy()
+    df["latitud"] = _to_float(df["latitud"])
+    df["longitud"] = _to_float(df["longitud"])
+
+    municipios = df_divipola.copy()
+    municipios["id_municipio"] = municipios["cod_mpio"].astype(str).str.zfill(5)
+    municipios["latitud_centroide"] = _to_float(municipios["latitud"])
+    municipios["longitud_centroide"] = _to_float(municipios["longitud"])
+    municipios = municipios.dropna(subset=["latitud_centroide", "longitud_centroide"])
+
+    muni_lat = municipios["latitud_centroide"].to_numpy()
+    muni_lon = municipios["longitud_centroide"].to_numpy()
+    muni_ids = municipios["id_municipio"].to_numpy()
+
+    assigned_ids: list[str | None] = []
+    distances: list[float | None] = []
+    methods: list[str] = []
+
+    divipola_map = load_divipola_map()
+    synonym_map = build_synonym_map()
+
+    for row in df.itertuples(index=False):
+        lat = getattr(row, "latitud", None)
+        lon = getattr(row, "longitud", None)
+        fallback_name = getattr(row, fallback_col, None) if hasattr(row, fallback_col) else None
+
+        if pd.notna(lat) and pd.notna(lon) and len(muni_ids) > 0:
+            dist = _haversine_km(float(lat), float(lon), muni_lat, muni_lon)
+            idx = int(np.argmin(dist))
+            nearest_distance = float(dist[idx])
+            assigned_ids.append(str(muni_ids[idx]))
+            distances.append(nearest_distance)
+            if nearest_distance <= max_radius_km:
+                methods.append("spatial_within_radius")
+            else:
+                methods.append("spatial_nearest_outside_radius")
+            continue
+
+        fallback_id = resolver_municipio(fallback_name, divipola_map, synonym_map)
+        assigned_ids.append(fallback_id)
+        distances.append(None)
+        methods.append("text_fallback" if fallback_id else "unresolved")
+
+    df["id_municipio"] = assigned_ids
+    df["distancia_municipio_km"] = distances
+    df["metodo_asignacion_municipio"] = methods
+
+    fuera_radio = (df["metodo_asignacion_municipio"] == "spatial_nearest_outside_radius").sum()
+    sin_resolver = df["id_municipio"].isna().sum()
+    logger.info(
+        "Asignación espacial estaciones→municipio: %s estaciones, %s fuera del radio, %s sin resolver",
+        len(df),
+        int(fuera_radio),
+        int(sin_resolver),
+    )
     return df
