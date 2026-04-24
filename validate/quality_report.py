@@ -124,9 +124,11 @@ def run_quality_report(engine) -> pd.DataFrame:
                     "estado": estado,
                 })
                 if estado == "ALERTA":
-                    logger.warning(f"CALIDAD ALERTA — {check['mensaje']}: {valor:.2f}")
+                    val_str = f"{valor:.2f}" if valor is not None else "N/A"
+                    logger.warning(f"CALIDAD ALERTA — {check['mensaje']}: {val_str}")
                 else:
-                    logger.info(f"CALIDAD OK — {check['mensaje']}: {valor:.2f}")
+                    val_str = f"{valor:.2f}" if valor is not None else "N/A"
+                    logger.info(f"CALIDAD OK — {check['mensaje']}: {val_str}")
             except Exception as e:
                 logger.error(f"Error en check {check['nombre']}: {e}")
     return pd.DataFrame(resultados)
