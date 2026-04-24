@@ -19,13 +19,13 @@ CHECKS = [
     },
     {
         "nombre": "registros_sin_municipio",
-        "sql": "SELECT COUNT(*) FILTER (WHERE id_municipio IS NULL)::FLOAT / COUNT(*) * 100 AS pct FROM fact_produccion_agricola",
+        "sql": "SELECT COUNT(*) FILTER (WHERE id_municipio IS NULL)::FLOAT / NULLIF(COUNT(*), 0) * 100 AS pct FROM fact_produccion_agricola",
         "umbral_max": 0,
         "mensaje": "% registros de producción sin id_municipio",
     },
     {
         "nombre": "municipios_rendimiento_nulo",
-        "sql": "SELECT COUNT(*) FILTER (WHERE rendimiento_t_ha IS NULL OR rendimiento_t_ha = 0)::FLOAT / COUNT(*) * 100 AS pct FROM fact_produccion_agricola",
+        "sql": "SELECT COUNT(*) FILTER (WHERE rendimiento_t_ha IS NULL OR rendimiento_t_ha = 0)::FLOAT / NULLIF(COUNT(*), 0) * 100 AS pct FROM fact_produccion_agricola",
         "umbral_max": 5,
         "mensaje": "% registros de producción con rendimiento 0 o NULL",
     },

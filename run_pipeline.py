@@ -59,6 +59,22 @@ def run_etl():
     load_dim_region_natural(engine)
     load_dim_tiempo(engine)
     load_dim_municipio(engine, df_divipola, df_region_map=None)
+    
+    df_cultivos = df_produccion[["cultivo", "grupo_de_cultivo", "ciclo_de_cultivo"]].drop_duplicates()
+    df_cultivos = df_cultivos.rename(columns={
+        "cultivo": "nombre_cultivo",
+        "grupo_de_cultivo": "familia_botanica",
+        "ciclo_de_cultivo": "tipo_ciclo"
+    })
+    df_cultivos["nombre_normalizado"] = df_cultivos["nombre_cultivo"].astype(str).str.upper().str.strip()
+    
+    # El CHECK de la BD exige 'transitorio' o 'permanente' (minúsculas)
+    df_cultivos["tipo_ciclo"] = df_cultivos["tipo_ciclo"].astype(str).str.lower()
+    df_cultivos.loc[~df_cultivos["tipo_ciclo"].isin(['transitorio','permanente']), "tipo_ciclo"] = None
+    import numpy as np
+    df_cultivos = df_cultivos.replace({np.nan: None, "nan": None, "None": None})
+    
+    load_dim_cultivo(engine, df_cultivos)
 
     # ── Paso 4: Limpieza y normalización ────────
     logger.info("Paso 4: Limpiando y normalizando...")

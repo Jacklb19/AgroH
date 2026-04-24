@@ -9,16 +9,18 @@ logger = logging.getLogger(__name__)
 import urllib.parse
 
 def get_engine():
-    password = os.getenv('SUPABASE_DB_PASSWORD', '')
+    password = os.getenv('SUPABASE_DB_PASSWORD') or os.getenv('SUPABASE_DB_PASS', '')
     encoded_password = urllib.parse.quote_plus(password)
+    host = os.getenv('SUPABASE_DB_HOST', 'localhost')
     url = (
         f"postgresql+psycopg2://{os.getenv('SUPABASE_DB_USER')}:"
         f"{encoded_password}@"
-        f"{os.getenv('SUPABASE_DB_HOST')}:"
+        f"{host}:"
         f"{os.getenv('SUPABASE_DB_PORT', 5432)}/"
         f"{os.getenv('SUPABASE_DB_NAME', 'postgres')}"
     )
-    return create_engine(url, connect_args={"sslmode": "require"}, pool_pre_ping=True)
+    ssl_mode = "disable" if host in ["localhost", "127.0.0.1"] else "require"
+    return create_engine(url, connect_args={"sslmode": ssl_mode}, pool_pre_ping=True)
 
 
 def init_schema(engine):
