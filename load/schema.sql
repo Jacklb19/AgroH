@@ -111,6 +111,29 @@ CREATE TABLE IF NOT EXISTS fact_censo_agropecuario (
     UNIQUE (id_municipio, anio_censo)
 );
 
+CREATE TABLE IF NOT EXISTS fact_alerta_enso (
+    id               SERIAL PRIMARY KEY,
+    id_tiempo        INT  NOT NULL REFERENCES dim_tiempo(id_tiempo),
+    id_region        INT  NOT NULL REFERENCES dim_region_natural(id_region),
+    fase_enso        VARCHAR(20), -- El Niño, La Niña, Neutro
+    indice_spi       DOUBLE PRECISION,
+    anomalia_precipitacion_pct DOUBLE PRECISION,
+    probabilidad_deficit_hidrico DOUBLE PRECISION,
+    probabilidad_exceso_hidrico  DOUBLE PRECISION,
+    UNIQUE (id_tiempo, id_region)
+);
+
+CREATE TABLE IF NOT EXISTS fact_precios_insumos (
+    id               SERIAL PRIMARY KEY,
+    id_tiempo        INT  NOT NULL REFERENCES dim_tiempo(id_tiempo),
+    tipo_insumo      VARCHAR(50),
+    nombre_insumo    VARCHAR(100),
+    precio_cop_unidad DOUBLE PRECISION,
+    unidad_medida    VARCHAR(20),
+    id_region        INT REFERENCES dim_region_natural(id_region),
+    UNIQUE (id_tiempo, tipo_insumo, nombre_insumo)
+);
+
 -- ── CAPA 3: MODELO IA ─────────────────────────
 
 CREATE TABLE IF NOT EXISTS model_version (
