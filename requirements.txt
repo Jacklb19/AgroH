@@ -14,3 +14,4 @@ apscheduler
 scikit-learn
 xgboost
 openpyxl
+beautifulsoup4
