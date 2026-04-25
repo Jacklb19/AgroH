@@ -57,6 +57,28 @@ def run_core_etl(engine=None):
     logger.info("Paso 2: Extrayendo fuentes...")
     df_divipola    = extract_divipola()
     df_produccion  = extract_produccion()
+    
+    # Normalizar nombres de columnas para el nuevo dataset (Base 2019-2024)
+    rename_map = {
+        "a_o": "anio",
+        "rea_sembrada": "area_sembrada_ha",
+        "rea_cosechada": "area_cosechada_ha",
+        "producci_n": "produccion_total_ton",
+        "rendimiento": "rendimiento_t_ha",
+        "grupo_cultivo": "grupo_de_cultivo",
+        "ciclo_del_cultivo": "ciclo_de_cultivo",
+        "c_digo_dane_municipio": "id_municipio"
+    }
+    df_produccion = df_produccion.rename(columns=rename_map)
+    
+    # Asegurar tipos numéricos (vienen como strings en el JSON)
+    num_cols = ["anio", "area_sembrada_ha", "area_cosechada_ha", "produccion_total_ton", "rendimiento_t_ha"]
+    for col in num_cols:
+        if col in df_produccion.columns:
+            df_produccion[col] = pd.to_numeric(df_produccion[col], errors="coerce")
+    
+    # Rellenar ceros en lugar de NaNs para áreas y producción
+    df_produccion[num_cols[1:]] = df_produccion[num_cols[1:]].fillna(0)
 
     from extract.extract_ideam_estaciones import extract_estaciones
     df_estaciones = extract_estaciones()
@@ -89,7 +111,13 @@ def run_core_etl(engine=None):
 
     # ── Paso 4: Limpieza y normalización ────────
     logger.info("Paso 4: Limpiando y normalizando...")
-    df_produccion = agregar_id_municipio(df_produccion, col_nombre="municipio")
+    
+    # Si ya tenemos id_municipio (del código DANE), aseguramos 5 dígitos
+    if "id_municipio" in df_produccion.columns:
+        df_produccion["id_municipio"] = df_produccion["id_municipio"].astype(str).str.zfill(5)
+    else:
+        df_produccion = agregar_id_municipio(df_produccion, col_nombre="municipio")
+        
     df_estaciones = asignar_estaciones_a_municipios(df_estaciones, df_divipola, fallback_col="municipio")
     
     nulos = df_produccion["id_municipio"].isna().sum()

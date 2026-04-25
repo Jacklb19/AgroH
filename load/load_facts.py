@@ -25,7 +25,7 @@ def load_all_facts(engine, df_produccion: pd.DataFrame, df_boletines: pd.DataFra
     
     # 2. Unir df_produccion con dim_cultivo y dim_tiempo
     df_produccion["nombre_normalizado"] = df_produccion["cultivo"].astype(str).str.upper().str.strip()
-    df_produccion["anio"] = df_produccion["a_o"].astype(int)
+    df_produccion["anio"] = df_produccion["anio"].astype(int)
     
     df_merged = df_produccion.merge(dim_cultivo_db, on="nombre_normalizado", how="inner")
     df_merged = df_merged.merge(dim_tiempo_db, on="anio", how="inner")
@@ -35,11 +35,11 @@ def load_all_facts(engine, df_produccion: pd.DataFrame, df_boletines: pd.DataFra
         "id_municipio": df_merged["id_municipio"],
         "id_cultivo": df_merged["id_cultivo"],
         "id_tiempo": df_merged["id_tiempo"],
-        "area_sembrada_ha": df_merged["rea_sembrada_ha"],
-        "area_cosechada_ha": df_merged["rea_cosechada_ha"],
-        "produccion_total_ton": df_merged["producci_n_t"],
+        "area_sembrada_ha": df_merged["area_sembrada_ha"],
+        "area_cosechada_ha": df_merged["area_cosechada_ha"],
+        "produccion_total_ton": df_merged["produccion_total_ton"],
         "rendimiento_t_ha": df_merged["rendimiento_t_ha"],
-        "fuente_origen": "MinAgricultura A04/A05"
+        "fuente_origen": "MinAgricultura EVA 2019-2024"
     }
     df_fact = pd.DataFrame(fact_cols)
     

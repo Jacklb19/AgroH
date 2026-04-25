@@ -25,7 +25,7 @@ DB = {
 # URLs de fuentes
 SOURCES = {
     # A04 — datos.gov.co Socrata
-    "produccion_datosgov": "https://www.datos.gov.co/resource/2pnw-mmge.json",
+    "produccion_datosgov": "https://www.datos.gov.co/resource/uejq-wxrr.json",
     # A06 — SIPSA mayoristas microdatos
     "sipsa_mayoristas": "https://microdatos.dane.gov.co/index.php/catalog/776",
     # A08 — Catálogo estaciones IDEAM Socrata
@@ -48,7 +48,7 @@ YEAR_START = 2007
 YEAR_END   = 2025
 
 # Período histórico clima (más corto para descargas rápidas, ampliar después)
-CLIMA_YEAR_START = 2020
+CLIMA_YEAR_START = 2018
 
 # Regiones naturales (orden fijo = id_region)
 REGIONES_NATURALES = ["Andina", "Caribe", "Pacífico", "Orinoquía", "Amazonía"]
