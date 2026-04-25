@@ -293,3 +293,44 @@ def load_fact_censo_agropecuario(engine, df_censo: pd.DataFrame):
         logger.warning(f"fact_censo_agropecuario: {descartados} registros descartados por id_municipio fuera de dim_municipio")
     upsert(engine, "fact_censo_agropecuario", df_fact, ["id_municipio", "anio_censo"])
     logger.info("fact_censo_agropecuario: %s registros cargados", len(df_fact))
+
+def load_fact_precios_insumos(engine, df_insumos: pd.DataFrame):
+    """Carga precios de insumos agrícolas mensuales."""
+    from .db import upsert
+
+    if df_insumos.empty:
+        logger.info("Sin precios de insumos para cargar")
+        return
+
+    dim_tiempo_db = pd.read_sql("SELECT id_tiempo, fecha FROM dim_tiempo", engine)
+    # Asegurar que dim_tiempo_db["fecha"] sea datetime para el merge
+    dim_tiempo_db["fecha"] = pd.to_datetime(dim_tiempo_db["fecha"])
+
+    df = df_insumos.copy()
+    df["fecha"] = pd.to_datetime(df["fecha"])
+    
+    # Unir con dim_tiempo por la fecha exacta (primer día del mes)
+    df = df.merge(dim_tiempo_db, on="fecha", how="inner")
+    
+    if df.empty:
+        logger.warning("No fue posible mapear precios de insumos a dim_tiempo")
+        return
+
+    cols = [
+        "id_tiempo",
+        "tipo_insumo",
+        "nombre_insumo",
+        "precio_cop_unidad",
+        "unidad_medida",
+        "id_region",
+    ]
+    for col in cols:
+        if col not in df.columns:
+            df[col] = None
+
+    df_fact = df[cols].copy()
+    # Eliminar duplicados en las llaves naturales del schema
+    df_fact = df_fact.drop_duplicates(subset=["id_tiempo", "tipo_insumo", "nombre_insumo"])
+    
+    upsert(engine, "fact_precios_insumos", df_fact, ["id_tiempo", "tipo_insumo", "nombre_insumo"])
+    logger.info("fact_precios_insumos: %s registros cargados", len(df_fact))

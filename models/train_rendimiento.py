@@ -88,17 +88,77 @@ def train_and_report(engine=None) -> dict:
         X, y, test_size=0.2, random_state=42
     )
     model.fit(X_train, y_train)
-    pred = model.predict(X_test)
+    pred_test = model.predict(X_test)
 
     metrics = {
-        "mae": float(mean_absolute_error(y_test, pred)),
-        "rmse": float(mean_squared_error(y_test, pred) ** 0.5),
-        "r2": float(r2_score(y_test, pred)),
+        "mae": float(mean_absolute_error(y_test, pred_test)),
+        "rmse": float(mean_squared_error(y_test, pred_test) ** 0.5),
+        "r2": float(r2_score(y_test, pred_test)),
         "n_train": int(len(X_train)),
         "n_test": int(len(X_test)),
     }
     logger.info("Modelo %s entrenado con métricas: %s", model_name, metrics)
+    
+    # --- PERSISTENCIA ---
+    save_model_to_db(engine, model, model_name, metrics, df, feature_cols)
+    
     return {"model_name": model_name, "metrics": metrics}
+
+
+def save_model_to_db(engine, model, model_name, metrics, df_full, feature_cols):
+    import joblib
+    from datetime import datetime
+    from sqlalchemy import text
+    import os
+
+    # 1. Guardar binario
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    model_dir = "models/saved"
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = f"{model_dir}/{model_name}_{timestamp}.joblib"
+    joblib.dump(model, model_path)
+
+    # 2. Registrar versión
+    with engine.begin() as conn:
+        # Desactivar versiones previas
+        conn.execute(text("UPDATE model_version SET activo = false WHERE nombre_modelo = :name"), {"name": model_name})
+        
+        # Insertar nueva
+        res = conn.execute(text("""
+            INSERT INTO model_version (nombre_modelo, metricas_json, activo)
+            VALUES (:name, :metrics, true)
+            RETURNING id_version
+        """), {
+            "name": model_name,
+            "metrics": json.dumps(metrics)
+        })
+        id_version = res.fetchone()[0]
+
+        # 3. Guardar predicciones históricas (para auditoría/visualización)
+        X_full = df_full[feature_cols].fillna(0)
+        df_full["rendimiento_predicho_t_ha"] = model.predict(X_full)
+        df_full["id_version"] = id_version
+
+        logger.info("Mapeando tiempos para persistencia de predicciones...")
+        # Mapeamos a un id_tiempo representativo por año (mes 6) para la visualización anual
+        df_tiempo = pd.read_sql("SELECT id_tiempo, anio FROM dim_tiempo WHERE mes = 6", engine)
+        df_to_load = df_full.merge(df_tiempo, on="anio", how="inner")
+        
+        load_cols = ["id_municipio", "id_cultivo", "id_tiempo", "rendimiento_predicho_t_ha", "id_version"]
+        
+        logger.info(f"Insertando {len(df_to_load)} predicciones en pred_rendimiento...")
+        # Limpiar predicciones previas de este modelo si existen
+        conn.execute(text("DELETE FROM pred_rendimiento WHERE id_version IN (SELECT id_version FROM model_version WHERE nombre_modelo = :name)"), {"name": model_name})
+        
+        df_to_load[load_cols].to_sql(
+            "pred_rendimiento", 
+            engine, 
+            if_exists="append", 
+            index=False, 
+            chunksize=100
+        )
+
+    logger.info("Predicciones y versión del modelo guardadas exitosamente.")
 
 
 if __name__ == "__main__":

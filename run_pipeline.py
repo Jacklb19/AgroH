@@ -194,18 +194,30 @@ def run_extended_etl(engine=None):
         load_fact_precios_mayoristas,
         load_fact_aptitud_suelo,
         load_fact_censo_agropecuario,
+        load_fact_precios_insumos,
     )
+    from extract.extract_insumos import extract_insumos_ipia
+    from clean.clean_insumos import clean_insumos_ipia
+    from clean.clean_boletines import clean_boletines_enso
     from extract.extract_divipola import extract_divipola
     from extract.extract_cna import extract_cna
     
     if engine is None:
         engine = get_engine()
 
-    df_boletines = extract_all_boletines()
+    df_boletines_raw = extract_all_boletines()
+    df_boletines = clean_boletines_enso()
     if not df_boletines.empty:
         load_fact_alerta_enso(engine, df_boletines)
     else:
         logger.info("ENSO: sin boletines configurados o detectados")
+
+    df_insumos_raw = extract_insumos_ipia()
+    df_insumos = clean_insumos_ipia()
+    if not df_insumos.empty:
+        load_fact_precios_insumos(engine, df_insumos)
+    else:
+        logger.info("IPIA: no se pudieron obtener precios de insumos")
 
     df_sipsa_raw = extract_sipsa()
     df_precios = normalizar_precios_sipsa(df_sipsa_raw)
