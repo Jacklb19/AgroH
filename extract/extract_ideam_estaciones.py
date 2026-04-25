@@ -24,5 +24,5 @@ def extract_estaciones() -> pd.DataFrame:
     df = pd.DataFrame(rows)
     out = DATA_RAW / "ideam_estaciones_raw.csv"
     df.to_csv(out, index=False)
-    logger.info(f"IDEAM Estaciones: {len(df)} registros → {out}")
+    logger.info(f"IDEAM Estaciones: {len(df)} registros -> {out}")
     return df

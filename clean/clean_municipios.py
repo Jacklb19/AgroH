@@ -92,7 +92,7 @@ def resolver_municipio(nombre: str, divipola_map: dict, synonym_map: dict) -> st
         return divipola_map[norm]
     if norm in synonym_map:
         return synonym_map[norm]
-    logger.debug(f"Municipio no resuelto: '{nombre}' → '{norm}'")
+    logger.debug(f"Municipio no resuelto: '{nombre}' -> '{norm}'")
     return None
 
 def agregar_id_municipio(df: pd.DataFrame, col_nombre: str) -> pd.DataFrame:
@@ -200,7 +200,7 @@ def asignar_estaciones_a_municipios(
     fuera_radio = (df["metodo_asignacion_municipio"] == "spatial_nearest_outside_radius").sum()
     sin_resolver = df["id_municipio"].isna().sum()
     logger.info(
-        "Asignación espacial estaciones→municipio: %s estaciones, %s fuera del radio, %s sin resolver",
+        "Asignación espacial estaciones->municipio: %s estaciones, %s fuera del radio, %s sin resolver",
         len(df),
         int(fuera_radio),
         int(sin_resolver),
