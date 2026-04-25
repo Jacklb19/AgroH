@@ -1,0 +1,383 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.2811,
+          -1.2136
+        ]
+      },
+      "properties": {
+        "codmunicipio": "52001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "alta",
+        "tipo_suelo": "Franco arenoso",
+        "textura_suelo": "Franco arenoso",
+        "pendiente_dominante": "Plana (<3%)",
+        "drenaje": "Bueno",
+        "limitante_principal": "Ninguna",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.865,
+          -1.542
+        ]
+      },
+      "properties": {
+        "codmunicipio": "52215",
+        "cultivo": "PAPA",
+        "clase_aptitud": "alta",
+        "tipo_suelo": "Franco arcilloso",
+        "textura_suelo": "Franco arcilloso",
+        "pendiente_dominante": "Plana (<3%)",
+        "drenaje": "Bueno",
+        "limitante_principal": "Ninguna",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.2811,
+          -1.2136
+        ]
+      },
+      "properties": {
+        "codmunicipio": "52001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "moderada",
+        "tipo_suelo": "Arcilloso",
+        "textura_suelo": "Arcilloso",
+        "pendiente_dominante": "Ondulada (3-12%)",
+        "drenaje": "Moderado",
+        "limitante_principal": "Acidez",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.6147,
+          2.4448
+        ]
+      },
+      "properties": {
+        "codmunicipio": "19001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "alta",
+        "tipo_suelo": "Franco",
+        "textura_suelo": "Franco",
+        "pendiente_dominante": "Plana (<3%)",
+        "drenaje": "Bueno",
+        "limitante_principal": "Ninguna",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.78,
+          2.319
+        ]
+      },
+      "properties": {
+        "codmunicipio": "19022",
+        "cultivo": "PAPA",
+        "clase_aptitud": "moderada",
+        "tipo_suelo": "Franco limoso",
+        "textura_suelo": "Franco limoso",
+        "pendiente_dominante": "Ondulada (3-12%)",
+        "drenaje": "Bueno",
+        "limitante_principal": "Pendiente",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -75.5812,
+          6.2442
+        ]
+      },
+      "properties": {
+        "codmunicipio": "05001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "moderada",
+        "tipo_suelo": "Franco arcilloso",
+        "textura_suelo": "Franco arcilloso",
+        "pendiente_dominante": "Quebrada (>25%)",
+        "drenaje": "Imperfecto",
+        "limitante_principal": "Pendiente",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -75.974,
+          5.9028
+        ]
+      },
+      "properties": {
+        "codmunicipio": "05088",
+        "cultivo": "PAPA",
+        "clase_aptitud": "marginal",
+        "tipo_suelo": "Arcillo arenoso",
+        "textura_suelo": "Arcillo arenoso",
+        "pendiente_dominante": "Fuerte (>50%)",
+        "drenaje": "Pobre",
+        "limitante_principal": "Pendiente y erosion",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -74.0761,
+          4.5981
+        ]
+      },
+      "properties": {
+        "codmunicipio": "25001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "alta",
+        "tipo_suelo": "Franco",
+        "textura_suelo": "Franco",
+        "pendiente_dominante": "Plana (<3%)",
+        "drenaje": "Bueno",
+        "limitante_principal": "Ninguna",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -74.0,
+          5.0333
+        ]
+      },
+      "properties": {
+        "codmunicipio": "25099",
+        "cultivo": "PAPA",
+        "clase_aptitud": "moderada",
+        "tipo_suelo": "Franco limoso",
+        "textura_suelo": "Franco limoso",
+        "pendiente_dominante": "Ligeramente ondulada",
+        "drenaje": "Bueno",
+        "limitante_principal": "Baja fertilidad",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -73.1198,
+          7.1254
+        ]
+      },
+      "properties": {
+        "codmunicipio": "68001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "moderada",
+        "tipo_suelo": "Arcillo limoso",
+        "textura_suelo": "Arcillo limoso",
+        "pendiente_dominante": "Ondulada (3-12%)",
+        "drenaje": "Moderado",
+        "limitante_principal": "Profundidad efectiva",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -75.2322,
+          4.4389
+        ]
+      },
+      "properties": {
+        "codmunicipio": "73001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "alta",
+        "tipo_suelo": "Franco arenoso",
+        "textura_suelo": "Franco arenoso",
+        "pendiente_dominante": "Plana (<3%)",
+        "drenaje": "Bueno",
+        "limitante_principal": "Ninguna",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.532,
+          3.4516
+        ]
+      },
+      "properties": {
+        "codmunicipio": "76001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "alta",
+        "tipo_suelo": "Franco",
+        "textura_suelo": "Franco",
+        "pendiente_dominante": "Plana (<3%)",
+        "drenaje": "Bueno",
+        "limitante_principal": "Ninguna",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -73.6352,
+          4.1534
+        ]
+      },
+      "properties": {
+        "codmunicipio": "50001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "alta",
+        "tipo_suelo": "Franco arenoso",
+        "textura_suelo": "Franco arenoso",
+        "pendiente_dominante": "Plana (<3%)",
+        "drenaje": "Bueno",
+        "limitante_principal": "Ninguna",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -72.3833,
+          5.3333
+        ]
+      },
+      "properties": {
+        "codmunicipio": "85001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "moderada",
+        "tipo_suelo": "Arenoso",
+        "textura_suelo": "Arenoso",
+        "pendiente_dominante": "Plana (<3%)",
+        "drenaje": "Excesivo",
+        "limitante_principal": "Baja fertilidad",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -73.3667,
+          5.5333
+        ]
+      },
+      "properties": {
+        "codmunicipio": "15001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "moderada",
+        "tipo_suelo": "Franco",
+        "textura_suelo": "Franco",
+        "pendiente_dominante": "Ondulada (3-12%)",
+        "drenaje": "Bueno",
+        "limitante_principal": "Ninguna",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -75.2833,
+          2.9333
+        ]
+      },
+      "properties": {
+        "codmunicipio": "41001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "alta",
+        "tipo_suelo": "Franco arcilloso",
+        "textura_suelo": "Franco arcilloso",
+        "pendiente_dominante": "Ondulada (3-12%)",
+        "drenaje": "Bueno",
+        "limitante_principal": "Ninguna",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -75.5144,
+          10.3997
+        ]
+      },
+      "properties": {
+        "codmunicipio": "13001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "marginal",
+        "tipo_suelo": "Arcilloso",
+        "textura_suelo": "Arcilloso",
+        "pendiente_dominante": "Plana (<3%)",
+        "drenaje": "Pobre",
+        "limitante_principal": "Drenaje",
+        "layerName": "papa"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -75.8814,
+          8.7479
+        ]
+      },
+      "properties": {
+        "codmunicipio": "23001",
+        "cultivo": "PAPA",
+        "clase_aptitud": "moderada",
+        "tipo_suelo": "Arcillo limoso",
+        "textura_suelo": "Arcillo limoso",
+        "pendiente_dominante": "Plana (<3%)",
+        "drenaje": "Imperfecto",
+        "limitante_principal": "Drenaje",
+        "layerName": "papa"
+      }
+    }
+  ]
+}

@@ -6,7 +6,13 @@ from config.settings import SOURCES, DATA_RAW
 logger = logging.getLogger(__name__)
 
 def extract_divipola() -> pd.DataFrame:
-    """Descarga el catálogo DIVIPOLA completo desde datos.gov.co (Socrata)."""
+    """Descarga el catálogo DIVIPOLA completo desde datos.gov.co (Socrata).
+    Si ya existe localmente, lo carga desde caché. Borra el CSV para forzar re-descarga."""
+    out = DATA_RAW / "divipola.csv"
+    if out.exists():
+        logger.info("DIVIPOLA: cargando desde caché local (%s)", out)
+        return pd.read_csv(out, dtype=str)
+
     url = SOURCES["divipola"]
     rows, offset, limit = [], 0, 1000
     logger.info("Descargando DIVIPOLA...")
@@ -19,7 +25,6 @@ def extract_divipola() -> pd.DataFrame:
         rows.extend(batch)
         offset += limit
     df = pd.DataFrame(rows)
-    out = DATA_RAW / "divipola.csv"
     df.to_csv(out, index=False)
-    logger.info(f"DIVIPOLA: {len(df)} municipios → {out}")
+    logger.info("DIVIPOLA: %s municipios -> %s", len(df), out)
     return df

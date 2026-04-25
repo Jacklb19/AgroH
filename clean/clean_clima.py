@@ -110,5 +110,5 @@ def unificar_clima_mensual(df_precip: pd.DataFrame,
 
     out = DATA_PROCESSED / "clima_mensual.parquet"
     result.to_parquet(out, index=False)
-    logger.info(f"Clima mensual unificado: {len(result)} registros → {out}")
+    logger.info(f"Clima mensual unificado: {len(result)} registros -> {out}")
     return result

@@ -42,7 +42,7 @@ def load_dim_tiempo(engine, anios_nino: list = None):
 def load_dim_municipio(engine, df_divipola: pd.DataFrame, df_region_map: pd.DataFrame):
     """
     df_divipola: resultado del extractor DIVIPOLA
-    df_region_map: mapeo id_municipio → id_region (construido manualmente o por departamento)
+    df_region_map: mapeo id_municipio -> id_region (construido manualmente o por departamento)
     """
     df = df_divipola.rename(columns={
         "cod_mpio":   "id_municipio",
@@ -84,4 +84,27 @@ def load_dim_estacion_ideam(engine, df_estaciones: pd.DataFrame):
     upsert(engine, "dim_estacion_ideam", df_estaciones, ["id_estacion"])
 
 def load_dim_central_abastos(engine, df_centrales: pd.DataFrame):
-    upsert(engine, "dim_central_abastos", df_centrales, ["nombre_central", "ciudad"])
+    import pandas as pd
+    # Ensure the UNIQUE constraint exists on the live table (idempotent, compatible with PG < 12)
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'uq_central_ciudad'
+                ) THEN
+                    ALTER TABLE dim_central_abastos
+                    ADD CONSTRAINT uq_central_ciudad UNIQUE (nombre_central, ciudad);
+                END IF;
+            END $$;
+        """))
+    df = df_centrales.copy()
+    # Convert ArrowStringArray / float NaN → Python None so psycopg2 sends SQL NULL
+    import numpy as np
+    df["id_municipio"] = [
+        None if (isinstance(v, float) and np.isnan(v)) or v is None or (isinstance(v, str) and v.strip() == "")
+        else v
+        for v in df["id_municipio"].tolist()
+    ]
+    upsert(engine, "dim_central_abastos", df, ["nombre_central", "ciudad"])

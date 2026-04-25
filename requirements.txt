@@ -13,3 +13,4 @@ python-dotenv
 apscheduler
 scikit-learn
 xgboost
+openpyxl

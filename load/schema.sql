@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS dim_central_abastos (
     id_central   SERIAL PRIMARY KEY,
     nombre_central VARCHAR(150) NOT NULL,
     ciudad         VARCHAR(100) NOT NULL,
-    id_municipio   CHAR(5) REFERENCES dim_municipio(id_municipio)
+    id_municipio   CHAR(5) REFERENCES dim_municipio(id_municipio),
+    UNIQUE (nombre_central, ciudad)
 );
 
 -- ── CAPA 2: HECHOS HISTÓRICOS ─────────────────
@@ -166,7 +167,8 @@ CREATE TABLE IF NOT EXISTS pred_rendimiento (
     rendimiento_predicho_t_ha      DOUBLE PRECISION,
     intervalo_confianza_inferior   DOUBLE PRECISION,
     intervalo_confianza_superior   DOUBLE PRECISION,
-    id_version       INT REFERENCES model_version(id_version)
+    id_version       INT REFERENCES model_version(id_version),
+    UNIQUE (id_municipio, id_cultivo, id_tiempo)
 );
 
 CREATE TABLE IF NOT EXISTS pred_alerta_climatica (
@@ -178,7 +180,8 @@ CREATE TABLE IF NOT EXISTS pred_alerta_climatica (
     score_probabilidad DOUBLE PRECISION,
     descripcion_generada TEXT,
     activa           BOOLEAN DEFAULT TRUE,
-    id_version       INT REFERENCES model_version(id_version)
+    id_version       INT REFERENCES model_version(id_version),
+    UNIQUE (id_municipio, id_tiempo)
 );
 
 -- ── CAPA 4: RAW ───────────────────────────────

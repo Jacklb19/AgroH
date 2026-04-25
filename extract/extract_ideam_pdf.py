@@ -48,19 +48,41 @@ def extract_boletin_pdf(pdf_path: Path, trimestre: str, anio: int) -> pd.DataFra
     return pd.DataFrame(registros)
 
 
+_MES_A_TRIMESTRE = {
+    "ene": "T1", "jan": "T1", "feb": "T1", "mar": "T1",
+    "abr": "T2", "apr": "T2", "may": "T2", "jun": "T2",
+    "jul": "T3", "ago": "T3", "aug": "T3", "sep": "T3",
+    "oct": "T4", "nov": "T4", "dic": "T4", "dec": "T4",
+}
+
+
 def _infer_periodo(filename: str) -> tuple[int, str]:
     patterns = [
-        r"(?P<anio>\d{4})[_-]?T(?P<trimestre>[1-4])",
+        r"(?P<anio>\d{4})[_-]?[tT](?P<trimestre>[1-4])",
         r"(?P<anio>\d{4}).*trimestre[_ -]?(?P<trimestre>[1-4])",
         r"trimestre[_ -]?(?P<trimestre>[1-4]).*(?P<anio>\d{4})",
     ]
     lower_name = filename.lower()
     for pattern in patterns:
-        match = re.search(pattern, lower_name)
+        match = re.search(pattern, lower_name, re.IGNORECASE)
         if match:
-            anio = int(match.group("anio"))
-            trimestre = f"T{match.group('trimestre')}"
-            return anio, trimestre
+            return int(match.group("anio")), f"T{match.group('trimestre')}"
+
+    # Formato IDEAM: "boletin_jul2025.pdf" o "dic2025" o "2025_jul"
+    month_match = re.search(
+        r"([a-z]{3})[_\-]?(\d{4})|(\d{4})[_\-]?([a-z]{3})",
+        lower_name,
+    )
+    if month_match:
+        if month_match.group(1) and month_match.group(2):
+            mes, anio_str = month_match.group(1), month_match.group(2)
+        else:
+            anio_str, mes = month_match.group(3), month_match.group(4)
+        trimestre = _MES_A_TRIMESTRE.get(mes[:3])
+        if trimestre:
+            return int(anio_str), trimestre
+
+    logger.warning("No se pudo inferir periodo de '%s' — asignando T0/0", filename)
     return 0, "T0"
 
 def extract_all_boletines() -> pd.DataFrame:
@@ -70,27 +92,39 @@ def extract_all_boletines() -> pd.DataFrame:
     all_dfs = []
 
     urls = list(BOLETIN_URLS)
+    url_filenames = set()
     for url in urls:
         filename = url.rstrip("/").split("/")[-1]
+        url_filenames.add(filename)
         local = pdf_dir / filename
         if not local.exists():
-            logger.info(f"Descargando {filename}...")
-            r = requests.get(url, timeout=60)
-            r.raise_for_status()
-            local.write_bytes(r.content)
+            logger.info("Descargando %s...", filename)
+            try:
+                r = requests.get(url, timeout=60)
+                r.raise_for_status()
+                local.write_bytes(r.content)
+            except Exception as exc:
+                logger.warning("No se pudo descargar %s: %s", url, exc)
+                continue
         anio, trimestre = _infer_periodo(filename)
+        if anio == 0:
+            logger.info("Omitiendo %s: nombre sin informacion de periodo", filename)
+            continue
         df = extract_boletin_pdf(local, trimestre, anio)
         all_dfs.append(df)
 
     for local in sorted(pdf_dir.glob("*.pdf")):
-        if urls and local.name in {url.rstrip("/").split("/")[-1] for url in urls}:
+        if local.name in url_filenames:
             continue
         anio, trimestre = _infer_periodo(local.name)
+        if anio == 0:
+            logger.info("Omitiendo %s: nombre sin informacion de periodo", local.name)
+            continue
         df = extract_boletin_pdf(local, trimestre, anio)
         all_dfs.append(df)
 
     result = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
     out = DATA_RAW / "enso_boletines_raw.csv"
     result.to_csv(out, index=False)
-    logger.info(f"A10 boletines: {len(result)} registros → {out}")
+    logger.info("A10 boletines: %s registros -> %s", len(result), out)
     return result

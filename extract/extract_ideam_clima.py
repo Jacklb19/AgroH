@@ -122,9 +122,13 @@ def extract_precipitacion_mensual() -> pd.DataFrame:
     all_dfs = []
     for anio in range(CLIMA_YEAR_START, YEAR_END + 1):
         cache = out_dir / f"precipitacion_mensual_{anio}.parquet"
+        skip_marker = out_dir / f"precipitacion_mensual_{anio}.skip"
         if cache.exists():
             logger.info(f"  {anio}: usando caché local ({cache})")
             df_year = pd.read_parquet(cache)
+        elif skip_marker.exists():
+            logger.info(f"  {anio}: omitido (falló en run anterior — borra {skip_marker.name} para reintentar)")
+            continue
         else:
             logger.info(f"  {anio}: consultando agregados en API...")
             df_year = _download_aggregated(
@@ -136,8 +140,12 @@ def extract_precipitacion_mensual() -> pd.DataFrame:
             )
             if not df_year.empty:
                 df_year.to_parquet(cache, index=False)
-                logger.info(f"  {anio}: {len(df_year)} registros agregados → {cache}")
-        
+                logger.info(f"  {anio}: {len(df_year)} registros agregados -> {cache}")
+            else:
+                skip_marker.touch()
+                logger.warning(f"  {anio}: sin datos — marcado para omitir en próximos runs")
+                continue
+
         if not df_year.empty:
             all_dfs.append(df_year)
 
@@ -161,9 +169,13 @@ def extract_clima_combinado_mensual() -> pd.DataFrame:
     all_dfs = []
     for anio in range(CLIMA_YEAR_START, YEAR_END + 1):
         cache = out_dir / f"clima_combinado_mensual_{anio}.parquet"
+        skip_marker = out_dir / f"clima_combinado_mensual_{anio}.skip"
         if cache.exists():
             logger.info(f"  {anio}: usando caché local ({cache})")
             df_year = pd.read_parquet(cache)
+        elif skip_marker.exists():
+            logger.info(f"  {anio}: omitido (borra {skip_marker.name} para reintentar)")
+            continue
         else:
             logger.info(f"  {anio}: consultando agregados en API...")
             df_year = _download_aggregated(
@@ -175,8 +187,12 @@ def extract_clima_combinado_mensual() -> pd.DataFrame:
             )
             if not df_year.empty:
                 df_year.to_parquet(cache, index=False)
-                logger.info(f"  {anio}: {len(df_year)} registros agregados → {cache}")
-        
+                logger.info(f"  {anio}: {len(df_year)} registros agregados -> {cache}")
+            else:
+                skip_marker.touch()
+                logger.info(f"  {anio}: sin datos del endpoint — marcado para omitir")
+                continue
+
         if not df_year.empty:
             all_dfs.append(df_year)
 

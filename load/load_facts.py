@@ -290,3 +290,154 @@ def load_fact_censo_agropecuario(engine, df_censo: pd.DataFrame):
     df_fact = df[cols].dropna(subset=["id_municipio"])
     upsert(engine, "fact_censo_agropecuario", df_fact, ["id_municipio", "anio_censo"])
     logger.info("fact_censo_agropecuario: %s registros cargados", len(df_fact))
+
+
+def load_fact_precios_insumos(engine, df_insumos: pd.DataFrame):
+    """
+    Carga fact_precios_insumos desde el DataFrame normalizado de insumos A07.
+    df_insumos debe tener: anio, mes, tipo_insumo, nombre_insumo,
+                           precio_cop_unidad, unidad_medida, region.
+    """
+    from .db import upsert
+
+    if df_insumos.empty:
+        logger.info("Sin datos de insumos para cargar")
+        return
+
+    # Unir con dim_tiempo
+    dim_tiempo_db = pd.read_sql("SELECT id_tiempo, anio, mes FROM dim_tiempo", engine)
+    df = df_insumos.copy()
+    df["anio"] = pd.to_numeric(df["anio"], errors="coerce").astype("Int64")
+    df["mes"]  = pd.to_numeric(df["mes"],  errors="coerce").astype("Int64")
+    df = df.merge(dim_tiempo_db, on=["anio", "mes"], how="inner")
+
+    if df.empty:
+        logger.warning("Insumos: no se pudo mapear ningún registro a dim_tiempo")
+        return
+
+    # Unir con dim_region_natural si hay columna region
+    if "region" in df.columns and df["region"].notna().any():
+        dim_region_db = pd.read_sql(
+            "SELECT id_region, nombre_region FROM dim_region_natural", engine
+        )
+        # Normalización básica para el join
+        import unicodedata
+
+        def _norm(s):
+            if not isinstance(s, str):
+                return ""
+            s = unicodedata.normalize("NFD", s.strip().lower())
+            return "".join(c for c in s if unicodedata.category(c) != "Mn")
+
+        dim_region_db["region_norm"] = dim_region_db["nombre_region"].apply(_norm)
+        df["region_norm"] = df["region"].apply(_norm)
+        df = df.merge(dim_region_db[["id_region", "region_norm"]], on="region_norm", how="left")
+    else:
+        df["id_region"] = None
+
+    cols = [
+        "id_tiempo",
+        "id_region",
+        "tipo_insumo",
+        "nombre_insumo",
+        "precio_cop_unidad",
+        "unidad_medida",
+    ]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = None
+
+    df_fact = (
+        df[cols]
+        .dropna(subset=["id_tiempo", "tipo_insumo", "nombre_insumo"])
+        .drop_duplicates(subset=["id_tiempo", "tipo_insumo", "nombre_insumo"])
+    )
+    # NaN in nullable integer column → must be Python None for psycopg2
+    df_fact = df_fact.copy()
+    df_fact["id_region"] = df_fact["id_region"].apply(lambda x: None if pd.isna(x) else x)
+    upsert(engine, "fact_precios_insumos", df_fact, ["id_tiempo", "tipo_insumo", "nombre_insumo"])
+    logger.info("fact_precios_insumos: %s registros cargados", len(df_fact))
+
+
+def load_raw_precios_mayoristas(engine, df_sipsa_raw: pd.DataFrame):
+    """
+    Persiste los microdatos SIPSA en granularidad ORIGINAL (diaria/semanal)
+    en la tabla raw_precios_mayoristas, antes de la agregación mensual.
+
+    df_sipsa_raw debe tener las mismas columnas que genera normalizar_precios_sipsa()
+    más la columna fecha_registro con la fecha exacta del precio.
+    """
+    from .db import upsert
+
+    if df_sipsa_raw.empty:
+        logger.info("Sin microdatos SIPSA raw para cargar")
+        return
+
+    df = df_sipsa_raw.copy()
+
+    # Resolver id_central desde dim_central_abastos
+    if "nombre_central" in df.columns and "ciudad" in df.columns:
+        dim_central_db = pd.read_sql(
+            "SELECT id_central, nombre_central, ciudad FROM dim_central_abastos", engine
+        )
+        df["nombre_central"] = df["nombre_central"].astype(str).str.strip()
+        df["ciudad"]         = df["ciudad"].astype(str).str.strip()
+        df = df.merge(dim_central_db, on=["nombre_central", "ciudad"], how="left")
+
+    # Resolver id_cultivo desde dim_cultivo
+    if "producto" in df.columns:
+        dim_cultivo_db = pd.read_sql(
+            "SELECT id_cultivo, nombre_normalizado FROM dim_cultivo", engine
+        )
+        df["nombre_normalizado"] = df["producto"].astype(str).str.upper().str.strip()
+        df = df.merge(dim_cultivo_db, on="nombre_normalizado", how="left")
+
+    # Asegurar fecha_registro como DATE
+    if "fecha_registro" not in df.columns and "fecha" in df.columns:
+        df["fecha_registro"] = pd.to_datetime(df["fecha"], errors="coerce")
+    else:
+        df["fecha_registro"] = pd.to_datetime(df.get("fecha_registro"), errors="coerce")
+
+    df = df.dropna(subset=["fecha_registro"])
+    df["fecha_registro"] = df["fecha_registro"].dt.date
+
+    cols = [
+        "id_central",
+        "id_cultivo",
+        "fecha_registro",
+        "precio_min_cop_kg",
+        "precio_max_cop_kg",
+        "precio_promedio_cop_kg",
+        "volumen_abastecimiento_ton",
+        "unidad_empaque",
+    ]
+    # Alias tolerantes
+    if "volumen_abastecimiento_ton" not in df.columns and "volumen_ton" in df.columns:
+        df["volumen_abastecimiento_ton"] = df["volumen_ton"]
+
+    for c in cols:
+        if c not in df.columns:
+            df[c] = None
+
+    df_raw = df[cols].dropna(subset=["fecha_registro"])
+    if df_raw.empty:
+        logger.warning("raw_precios_mayoristas: sin registros válidos para insertar")
+        return
+
+    # NaN in nullable integer/float columns → None for psycopg2
+    df_raw = df_raw.copy()
+    for _col in ["id_central", "id_cultivo", "precio_min_cop_kg", "precio_max_cop_kg",
+                 "precio_promedio_cop_kg", "volumen_abastecimiento_ton"]:
+        if _col in df_raw.columns:
+            df_raw[_col] = df_raw[_col].apply(lambda x: None if pd.isna(x) else x)
+
+    # Esta tabla no tiene UNIQUE constraint; se hace INSERT simple (no upsert)
+    with engine.begin() as conn:
+        from sqlalchemy import text
+        col_str = ", ".join(cols)
+        ph_str  = ", ".join([f":{c}" for c in cols])
+        conn.execute(
+            text(f"INSERT INTO raw_precios_mayoristas ({col_str}) VALUES ({ph_str})"),
+            df_raw.to_dict(orient="records"),
+        )
+    logger.info("raw_precios_mayoristas: %s microdatos insertados", len(df_raw))

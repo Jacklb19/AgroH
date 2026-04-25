@@ -56,6 +56,11 @@ def run_core_etl(engine=None):
     # ── Paso 2: Extracción ──────────────────────
     logger.info("Paso 2: Extrayendo fuentes...")
     df_divipola    = extract_divipola()
+
+    # Generar polígonos municipales (Voronoi) si no existen todavía
+    from extract.extract_municipios_geo import extract_municipios_geo
+    extract_municipios_geo(df_divipola)
+
     df_produccion  = extract_produccion()
 
     from extract.extract_ideam_estaciones import extract_estaciones
@@ -158,36 +163,47 @@ def run_extended_etl(engine=None):
     from extract.extract_ideam_pdf import extract_all_boletines
     from extract.extract_sipsa import extract_sipsa
     from extract.extract_sipra import extract_sipra
+    from extract.extract_insumos import extract_insumos
     from clean.clean_precios import normalizar_precios_sipsa, construir_dim_centrales
     from clean.clean_suelo import resumir_aptitud_suelo_por_municipio, load_censo_agropecuario_local
+    from clean.clean_insumos import normalizar_insumos
     from load.load_dimensions import load_dim_central_abastos
     from load.load_facts import (
         load_fact_alerta_enso,
         load_fact_precios_mayoristas,
         load_fact_aptitud_suelo,
         load_fact_censo_agropecuario,
+        load_fact_precios_insumos,
+        load_raw_precios_mayoristas,
     )
     from extract.extract_divipola import extract_divipola
 
     if engine is None:
         engine = get_engine()
 
+    # ── Boletines ENSO (A10) ───────────────────────────────────────
     df_boletines = extract_all_boletines()
     if not df_boletines.empty:
         load_fact_alerta_enso(engine, df_boletines)
     else:
         logger.info("ENSO: sin boletines configurados o detectados")
 
+    # ── Precios SIPSA (A06) ────────────────────────────────────────
     df_sipsa_raw = extract_sipsa()
-    df_precios = normalizar_precios_sipsa(df_sipsa_raw)
-    if not df_precios.empty:
-        df_centrales = construir_dim_centrales(df_precios)
-        if not df_centrales.empty:
-            load_dim_central_abastos(engine, df_centrales)
-        load_fact_precios_mayoristas(engine, df_precios)
+    if not df_sipsa_raw.empty:
+        # Cargar microdatos originales en raw_precios_mayoristas
+        load_raw_precios_mayoristas(engine, df_sipsa_raw)
+        # Normalizar y cargar en fact_precios_mayoristas
+        df_precios = normalizar_precios_sipsa(df_sipsa_raw)
+        if not df_precios.empty:
+            df_centrales = construir_dim_centrales(df_precios)
+            if not df_centrales.empty:
+                load_dim_central_abastos(engine, df_centrales)
+            load_fact_precios_mayoristas(engine, df_precios)
     else:
         logger.info("SIPSA: sin archivos manuales configurados")
 
+    # ── Aptitud de suelo SIPRA (A11) ──────────────────────────────
     df_divipola = extract_divipola()
     df_sipra = extract_sipra()
     df_suelo = resumir_aptitud_suelo_por_municipio(df_sipra, df_divipola)
@@ -196,13 +212,74 @@ def run_extended_etl(engine=None):
     else:
         logger.info("SIPRA: sin capas suficientes para generar fact_aptitud_suelo")
 
+    # ── Censo Agropecuario CNA 2014 (A12) ──────────────────────────
     df_censo = load_censo_agropecuario_local()
     if not df_censo.empty:
+        # El CSV del CNA está a nivel departamento (códigos xyx00).
+        # Mapeamos cada departamento a su municipio capital para satisfacer la FK.
+        _DPTO_A_CAPITAL = {
+            "05000": "05001", "08000": "08001", "11000": "11001", "13000": "13001",
+            "15000": "15001", "17000": "17001", "18000": "18001", "19000": "19001",
+            "20000": "20001", "23000": "23001", "25000": "25214", "27000": "27001",
+            "41000": "41001", "44000": "44001", "47000": "47001", "50000": "50001",
+            "52000": "52001", "54000": "54001", "63000": "63001", "66000": "66001",
+            "68000": "68001", "70000": "70001", "73000": "73001", "76000": "76001",
+            "81000": "81001", "85000": "85001", "86000": "86001", "88000": "88001",
+            "91000": "91001", "94000": "94001", "95000": "95001", "97000": "97001",
+            "99000": "99001",
+        }
+        if "id_municipio" in df_censo.columns:
+            df_censo["id_municipio"] = df_censo["id_municipio"].replace(_DPTO_A_CAPITAL)
         load_fact_censo_agropecuario(engine, df_censo)
     else:
         logger.info("CNA: sin archivo manual configurado")
 
+    # ── Insumos agrícolas (A07) ────────────────────────────────────
+    df_insumos_raw = extract_insumos()
+    if not df_insumos_raw.empty:
+        df_insumos = normalizar_insumos(df_insumos_raw)
+        if not df_insumos.empty:
+            load_fact_precios_insumos(engine, df_insumos)
+    else:
+        logger.info("Insumos A07: sin datos disponibles (API ni archivos manuales)")
+
     logger.info("FIN ETL EXTENDIDO — %s", datetime.now().isoformat())
+
+
+def run_models(engine=None):
+    """Entrena y persiste ambos modelos de IA en la base de datos."""
+    from load.db import get_engine
+    if engine is None:
+        engine = get_engine()
+
+    logger.info("INICIO ENTRENAMIENTO MODELOS IA — %s", datetime.now().isoformat())
+
+    # ── Modelo 1: Rendimiento agrícola ──────────────────────────────────
+    try:
+        from models.train_rendimiento import train_and_report as train_rendimiento
+        r1 = train_rendimiento(engine=engine)
+        logger.info(
+            "Rendimiento — R²: %.4f | MAE: %.4f | RMSE: %.4f",
+            r1["metrics"]["r2"],
+            r1["metrics"]["mae"],
+            r1["metrics"]["rmse"],
+        )
+    except Exception as exc:
+        logger.warning("Modelo rendimiento omitido: %s", exc)
+
+    # ── Modelo 2: Alerta climática ───────────────────────────────────
+    try:
+        from models.train_alerta_climatica import train_and_report as train_alerta
+        r2 = train_alerta(engine=engine)
+        logger.info(
+            "Alerta climática — F1: %.4f | Predicciones: %s",
+            r2["metrics"]["f1_weighted"],
+            r2["n_predicciones"],
+        )
+    except Exception as exc:
+        logger.warning("Modelo alerta climática omitido: %s", exc)
+
+    logger.info("FIN ENTRENAMIENTO MODELOS IA — %s", datetime.now().isoformat())
 
 
 def run_etl(mode: str = "all"):
@@ -214,6 +291,8 @@ def run_etl(mode: str = "all"):
         result = run_core_etl(engine=engine)
     if mode in {"extended", "all"}:
         run_extended_etl(engine=engine)
+    if mode in {"models", "all"}:
+        run_models(engine=engine)
     return result
 
 
@@ -223,7 +302,7 @@ if __name__ == "__main__":
                         help="Ejecutar el pipeline una sola vez y salir")
     parser.add_argument(
         "--mode",
-        choices=["core", "extended", "all"],
+        choices=["core", "extended", "models", "all"],
         default="all",
         help="Selecciona qué parte del pipeline ejecutar",
     )
@@ -234,9 +313,9 @@ if __name__ == "__main__":
     else:
         from apscheduler.schedulers.blocking import BlockingScheduler
         scheduler = BlockingScheduler(timezone="America/Bogota")
-        # Ejecutar todos los lunes a las 2 AM (hora Colombia)
         scheduler.add_job(run_etl, "cron", day_of_week="mon", hour=2, minute=0, kwargs={"mode": "core"})
-        logger.info("Scheduler activo — pipeline CORE programado los lunes a las 02:00 (Bogotá)")
+        scheduler.add_job(run_models, "cron", day_of_week="mon", hour=4, minute=0)
+        logger.info("Scheduler activo — ETL CORE: lunes 02:00 | MODELOS IA: lunes 04:00 (Bogotá)")
         logger.info("Ctrl+C para detener")
         try:
             scheduler.start()
