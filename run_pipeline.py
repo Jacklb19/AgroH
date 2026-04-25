@@ -187,7 +187,7 @@ def run_extended_etl(engine=None):
     from extract.extract_sipsa import extract_sipsa
     from extract.extract_sipra import extract_sipra
     from clean.clean_precios import normalizar_precios_sipsa, construir_dim_centrales
-    from clean.clean_suelo import resumir_aptitud_suelo_por_municipio, load_censo_agropecuario_local
+    from clean.clean_suelo import resumir_aptitud_suelo_por_municipio
     from load.load_dimensions import load_dim_central_abastos
     from load.load_facts import (
         load_fact_alerta_enso,
@@ -196,7 +196,8 @@ def run_extended_etl(engine=None):
         load_fact_censo_agropecuario,
     )
     from extract.extract_divipola import extract_divipola
-
+    from extract.extract_cna import extract_cna
+    
     if engine is None:
         engine = get_engine()
 
@@ -214,7 +215,7 @@ def run_extended_etl(engine=None):
             load_dim_central_abastos(engine, df_centrales)
         load_fact_precios_mayoristas(engine, df_precios)
     else:
-        logger.info("SIPSA: sin archivos manuales configurados")
+        logger.info("SIPSA: no se pudo automatizar los precios")
 
     df_divipola = extract_divipola()
     df_sipra = extract_sipra()
@@ -224,11 +225,11 @@ def run_extended_etl(engine=None):
     else:
         logger.info("SIPRA: sin capas suficientes para generar fact_aptitud_suelo")
 
-    df_censo = load_censo_agropecuario_local()
+    df_censo = extract_cna()
     if not df_censo.empty:
         load_fact_censo_agropecuario(engine, df_censo)
     else:
-        logger.info("CNA: sin archivo manual configurado")
+        logger.info("CNA: no se pudo automatizar el censo agropecuario")
 
     logger.info("FIN ETL EXTENDIDO — %s", datetime.now().isoformat())
 
