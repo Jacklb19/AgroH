@@ -259,6 +259,13 @@ def load_fact_aptitud_suelo(engine, df_suelo: pd.DataFrame):
         subset=["id_municipio", "id_cultivo"],
         keep="first",
     )
+    # Filtrar solo municipios que existen en dim_municipio para evitar FK violation
+    municipios_validos = pd.read_sql("SELECT id_municipio FROM dim_municipio", engine)["id_municipio"].tolist()
+    antes = len(df_fact)
+    df_fact = df_fact[df_fact["id_municipio"].isin(municipios_validos)]
+    descartados = antes - len(df_fact)
+    if descartados > 0:
+        logger.warning(f"fact_aptitud_suelo: {descartados} registros descartados por id_municipio no encontrado en dim_municipio")
     upsert(engine, "fact_aptitud_suelo", df_fact, ["id_municipio", "id_cultivo"])
     logger.info("fact_aptitud_suelo: %s registros cargados", len(df_fact))
 
@@ -288,5 +295,12 @@ def load_fact_censo_agropecuario(engine, df_censo: pd.DataFrame):
             df[col] = None
 
     df_fact = df[cols].dropna(subset=["id_municipio"])
+    # Filtrar solo municipios que existen en dim_municipio para evitar FK violation
+    municipios_validos = pd.read_sql("SELECT id_municipio FROM dim_municipio", engine)["id_municipio"].tolist()
+    antes = len(df_fact)
+    df_fact = df_fact[df_fact["id_municipio"].isin(municipios_validos)]
+    descartados = antes - len(df_fact)
+    if descartados > 0:
+        logger.warning(f"fact_censo_agropecuario: {descartados} registros descartados por id_municipio fuera de dim_municipio")
     upsert(engine, "fact_censo_agropecuario", df_fact, ["id_municipio", "anio_censo"])
     logger.info("fact_censo_agropecuario: %s registros cargados", len(df_fact))

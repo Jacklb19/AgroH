@@ -63,7 +63,16 @@ def upsert(engine, table: str, df, conflict_cols: list):
             ON CONFLICT ({conflict_str})
             DO NOTHING
         """
+    import math
     records = df.to_dict(orient="records")
+    # Reemplazar NaN/float nan con None para que psycopg2 envíe NULL correctamente
+    clean_records = []
+    for row in records:
+        clean_row = {
+            k: (None if (v is not None and isinstance(v, float) and math.isnan(v)) else v)
+            for k, v in row.items()
+        }
+        clean_records.append(clean_row)
     with engine.begin() as conn:
-        conn.execute(text(stmt), records)
-    logger.info(f"{table}: {len(records)} filas insertadas/actualizadas")
+        conn.execute(text(stmt), clean_records)
+    logger.info(f"{table}: {len(clean_records)} filas insertadas/actualizadas")

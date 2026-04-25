@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS dim_central_abastos (
     id_central   SERIAL PRIMARY KEY,
     nombre_central VARCHAR(150) NOT NULL,
     ciudad         VARCHAR(100) NOT NULL,
-    id_municipio   CHAR(5) REFERENCES dim_municipio(id_municipio)
+    id_municipio   CHAR(5) REFERENCES dim_municipio(id_municipio),
+    UNIQUE (nombre_central, ciudad)
 );
 
 -- ── CAPA 2: HECHOS HISTÓRICOS ─────────────────

@@ -92,5 +92,5 @@ def extract_all_boletines() -> pd.DataFrame:
     result = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
     out = DATA_RAW / "enso_boletines_raw.csv"
     result.to_csv(out, index=False)
-    logger.info(f"A10 boletines: {len(result)} registros → {out}")
+    logger.info(f"A10 boletines: {len(result)} registros -> {out}")
     return result

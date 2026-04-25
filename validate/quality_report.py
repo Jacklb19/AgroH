@@ -34,7 +34,7 @@ CHECKS = [
         "nombre": "modelos_activos_duplicados",
         "sql": "SELECT COUNT(*) AS pct FROM model_version WHERE activo = TRUE",
         "umbral_max": 1,
-        "mensaje": "Número de modelos activos en producción (debe ser ≤ 1)",
+        "mensaje": "Número de modelos activos en producción (debe ser <= 1)",
     },
     {
         "nombre": "estaciones_sin_municipio",
