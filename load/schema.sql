@@ -79,11 +79,6 @@ CREATE TABLE IF NOT EXISTS fact_clima_mensual (
     id_municipio     CHAR(5)     NOT NULL REFERENCES dim_municipio(id_municipio),
     id_tiempo        INT         NOT NULL REFERENCES dim_tiempo(id_tiempo),
     precipitacion_mm         DOUBLE PRECISION,
-    temperatura_media_c      DOUBLE PRECISION,
-    temperatura_max_c        DOUBLE PRECISION,
-    temperatura_min_c        DOUBLE PRECISION,
-    humedad_relativa_pct     DOUBLE PRECISION,
-    brillo_solar_horas_dia   DOUBLE PRECISION,
     UNIQUE (id_estacion, id_tiempo)
 );
 
@@ -99,39 +94,11 @@ CREATE TABLE IF NOT EXISTS fact_precios_mayoristas (
     UNIQUE (id_central, id_cultivo, id_tiempo)
 );
 
-CREATE TABLE IF NOT EXISTS fact_precios_insumos (
-    id               SERIAL PRIMARY KEY,
-    id_tiempo        INT  NOT NULL REFERENCES dim_tiempo(id_tiempo),
-    id_region        INT  REFERENCES dim_region_natural(id_region),
-    tipo_insumo      VARCHAR(50),
-    nombre_insumo    VARCHAR(100),
-    precio_cop_unidad  DOUBLE PRECISION,
-    unidad_medida      VARCHAR(50),
-    UNIQUE (id_tiempo, tipo_insumo, nombre_insumo)
-);
-
-CREATE TABLE IF NOT EXISTS fact_alerta_enso (
-    id               SERIAL PRIMARY KEY,
-    id_tiempo        INT NOT NULL REFERENCES dim_tiempo(id_tiempo),
-    id_region        INT NOT NULL REFERENCES dim_region_natural(id_region),
-    fase_enso                  VARCHAR(20) CHECK (fase_enso IN ('El Niño','La Niña','Neutro')),
-    indice_spi                 DOUBLE PRECISION,
-    anomalia_precipitacion_pct DOUBLE PRECISION,
-    probabilidad_deficit_hidrico  DOUBLE PRECISION,
-    probabilidad_exceso_hidrico   DOUBLE PRECISION,
-    UNIQUE (id_tiempo, id_region)
-);
-
 CREATE TABLE IF NOT EXISTS fact_aptitud_suelo (
     id               SERIAL PRIMARY KEY,
     id_municipio     CHAR(5) NOT NULL REFERENCES dim_municipio(id_municipio),
     id_cultivo       INT REFERENCES dim_cultivo(id_cultivo),
     clase_aptitud    VARCHAR(20) CHECK (clase_aptitud IN ('alta','moderada','marginal','no_apta')),
-    tipo_suelo       VARCHAR(100),
-    textura_suelo    VARCHAR(50),
-    pendiente_dominante VARCHAR(50),
-    drenaje          VARCHAR(50),
-    limitante_principal VARCHAR(100),
     UNIQUE (id_municipio, id_cultivo)
 );
 
@@ -139,11 +106,6 @@ CREATE TABLE IF NOT EXISTS fact_censo_agropecuario (
     id               SERIAL PRIMARY KEY,
     id_municipio     CHAR(5) NOT NULL REFERENCES dim_municipio(id_municipio),
     anio_censo       SMALLINT NOT NULL,
-    upa_promedio_ha                  DOUBLE PRECISION,
-    pct_tenencia_propia              DOUBLE PRECISION,
-    pct_tenencia_arrendada           DOUBLE PRECISION,
-    pct_acceso_riego                 DOUBLE PRECISION,
-    pct_asistencia_tecnica           DOUBLE PRECISION,
     area_cultivos_permanentes_ha     DOUBLE PRECISION,
     area_cultivos_transitorios_ha    DOUBLE PRECISION,
     UNIQUE (id_municipio, anio_censo)
@@ -182,16 +144,33 @@ CREATE TABLE IF NOT EXISTS pred_alerta_climatica (
     id_version       INT REFERENCES model_version(id_version)
 );
 
--- ── CAPA 4: RAW ───────────────────────────────
+-- ── CAPA 4: VISTAS DASHBOARD ───────────────────
 
-CREATE TABLE IF NOT EXISTS raw_precios_mayoristas (
-    id               SERIAL PRIMARY KEY,
-    id_central       INT REFERENCES dim_central_abastos(id_central),
-    id_cultivo       INT REFERENCES dim_cultivo(id_cultivo),
-    fecha_registro   DATE NOT NULL,
-    precio_min_cop_kg      DOUBLE PRECISION,
-    precio_max_cop_kg      DOUBLE PRECISION,
-    precio_promedio_cop_kg DOUBLE PRECISION,
-    volumen_ton            DOUBLE PRECISION,
-    unidad_empaque         VARCHAR(50)
-);
+DROP VIEW IF EXISTS v_dashboard_agro CASCADE;
+
+CREATE OR REPLACE VIEW v_dashboard_agro AS
+WITH clima_anual AS (
+    SELECT fc.id_municipio,
+        tc.anio,
+        avg(fc.precipitacion_mm) AS precipitacion_mm
+    FROM fact_clima_mensual fc
+    JOIN dim_tiempo tc ON tc.id_tiempo = fc.id_tiempo
+    GROUP BY fc.id_municipio, tc.anio
+)
+SELECT m.id_municipio AS codigo_divipola,
+    m.nombre_municipio,
+    m.nombre_departamento,
+    m.latitud_centroide,
+    m.longitud_centroide,
+    c.nombre_cultivo,
+    t.anio,
+    fp.area_sembrada_ha,
+    fp.area_cosechada_ha,
+    fp.produccion_total_ton,
+    fp.rendimiento_t_ha,
+    ca.precipitacion_mm
+FROM fact_produccion_agricola fp
+JOIN dim_municipio m ON m.id_municipio = fp.id_municipio
+JOIN dim_cultivo c ON c.id_cultivo = fp.id_cultivo
+JOIN dim_tiempo t ON t.id_tiempo = fp.id_tiempo
+LEFT JOIN clima_anual ca ON ca.id_municipio = fp.id_municipio AND ca.anio = t.anio;

@@ -39,11 +39,6 @@ def resumir_aptitud_suelo_por_municipio(
     if "aptitud" in df.columns:
         df["clase_aptitud"] = df["aptitud"].apply(map_aptitud)
 
-    # Las demás columnas requeridas las dejamos en None para que el schema las acepte
-    cols = ["tipo_suelo", "textura_suelo", "pendiente_dominante", "drenaje", "limitante_principal"]
-    for c in cols:
-        df[c] = None
-        
     return df
 
 
