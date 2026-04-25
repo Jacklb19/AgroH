@@ -13,9 +13,6 @@ WITH clima_anual AS (
     SELECT
         fc.id_municipio,
         dt.anio,
-        AVG(fc.temperatura_media_c) AS temperatura_media_c,
-        MAX(fc.temperatura_max_c) AS temperatura_max_c,
-        MIN(fc.temperatura_min_c) AS temperatura_min_c,
         SUM(fc.precipitacion_mm) AS precipitacion_mm
     FROM fact_clima_mensual fc
     JOIN dim_tiempo dt ON dt.id_tiempo = fc.id_tiempo
@@ -29,15 +26,13 @@ SELECT
     fp.area_sembrada_ha,
     fp.area_cosechada_ha,
     fp.produccion_total_ton,
-    ca.temperatura_media_c,
-    ca.temperatura_max_c,
-    ca.temperatura_min_c,
     ca.precipitacion_mm
 FROM fact_produccion_agricola fp
 JOIN dim_tiempo dt ON dt.id_tiempo = fp.id_tiempo
 LEFT JOIN clima_anual ca
     ON ca.id_municipio = fp.id_municipio
    AND ca.anio = dt.anio
+
 """
 
 
@@ -63,9 +58,6 @@ def train_and_report(engine=None) -> dict:
         "area_sembrada_ha",
         "area_cosechada_ha",
         "produccion_total_ton",
-        "temperatura_media_c",
-        "temperatura_max_c",
-        "temperatura_min_c",
         "precipitacion_mm",
     ]
     X = df[feature_cols].fillna(0)

@@ -38,11 +38,6 @@ def extract_cna() -> pd.DataFrame:
         # Para hacer un proof-of-concept de la automatización sin romper las reglas de negocio,
         # agregaremos las columnas que espera el schema, inicializándolas con datos vacíos o derivados.
         # (Idealmente habría que cruzar todos los 12 anexos, pero por rendimiento extraemos lo base).
-        df_uso["upa_promedio_ha"] = None
-        df_uso["pct_tenencia_propia"] = None
-        df_uso["pct_tenencia_arrendada"] = None
-        df_uso["pct_acceso_riego"] = None
-        df_uso["pct_asistencia_tecnica"] = None
         df_uso["area_cultivos_permanentes_ha"] = pd.to_numeric(df_uso["area_agropecuaria_ha"], errors='coerce') * 0.6 # Aproximación
         df_uso["area_cultivos_transitorios_ha"] = pd.to_numeric(df_uso["area_agropecuaria_ha"], errors='coerce') * 0.4 # Aproximación
         

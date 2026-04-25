@@ -91,8 +91,7 @@ def load_fact_clima_mensual(engine, df_clima_mensual: pd.DataFrame):
     # 5. Seleccionar columnas del schema
     cols_fact = [
         "id_estacion", "id_municipio", "id_tiempo",
-        "precipitacion_mm", "temperatura_media_c", "temperatura_max_c",
-        "temperatura_min_c", "humedad_relativa_pct", "brillo_solar_horas_dia"
+        "precipitacion_mm"
     ]
     # Asegurar que existen todas las columnas (pueden faltar si no hubo datos de ese sensor)
     for c in cols_fact:
@@ -245,11 +244,6 @@ def load_fact_aptitud_suelo(engine, df_suelo: pd.DataFrame):
         "id_municipio",
         "id_cultivo",
         "clase_aptitud",
-        "tipo_suelo",
-        "textura_suelo",
-        "pendiente_dominante",
-        "drenaje",
-        "limitante_principal",
     ]
     for col in cols:
         if col not in df.columns:
@@ -282,11 +276,6 @@ def load_fact_censo_agropecuario(engine, df_censo: pd.DataFrame):
     cols = [
         "id_municipio",
         "anio_censo",
-        "upa_promedio_ha",
-        "pct_tenencia_propia",
-        "pct_tenencia_arrendada",
-        "pct_acceso_riego",
-        "pct_asistencia_tecnica",
         "area_cultivos_permanentes_ha",
         "area_cultivos_transitorios_ha",
     ]

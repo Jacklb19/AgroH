@@ -104,7 +104,7 @@ def unificar_clima_mensual(df_precip: pd.DataFrame,
         result = result_dfs[0]
 
     # Asegurar columnas del schema (rellenar con None las que no tenemos aún)
-    for col in ["temperatura_media_c", "temperatura_max_c", "temperatura_min_c", "humedad_relativa_pct", "brillo_solar_horas_dia"]:
+    for col in ["precipitacion_mm"]:
         if col not in result.columns:
             result[col] = None
 
