@@ -13,10 +13,23 @@ WITH clima_anual AS (
     SELECT
         fc.id_municipio,
         dt.anio,
-        SUM(fc.precipitacion_mm) AS precipitacion_mm
+        SUM(fc.precipitacion_mm) AS precipitacion_mm,
+        AVG(fc.temperatura_media_c) AS temperatura_media_c,
+        AVG(fc.humedad_relativa_pct) AS humedad_relativa_pct,
+        AVG(fc.brillo_solar_horas_dia) AS brillo_solar_horas_dia
     FROM fact_clima_mensual fc
     JOIN dim_tiempo dt ON dt.id_tiempo = fc.id_tiempo
     GROUP BY fc.id_municipio, dt.anio
+),
+enso_anual AS (
+    SELECT
+        dt.anio,
+        dr.nombre_region,
+        MODE() WITHIN GROUP (ORDER BY fe.fase_enso) AS fase_enso_dominante
+    FROM fact_alerta_enso fe
+    JOIN dim_tiempo dt ON dt.id_tiempo = fe.id_tiempo
+    JOIN dim_region_natural dr ON dr.id_region = fe.id_region
+    GROUP BY dt.anio, dr.nombre_region
 )
 SELECT
     fp.id_municipio,
@@ -26,12 +39,30 @@ SELECT
     fp.area_sembrada_ha,
     fp.area_cosechada_ha,
     fp.produccion_total_ton,
-    ca.precipitacion_mm
+    ca.precipitacion_mm,
+    ca.temperatura_media_c,
+    ca.humedad_relativa_pct,
+    ca.brillo_solar_horas_dia,
+    CASE WHEN ea.fase_enso_dominante = 'El Niño' THEN 1
+         WHEN ea.fase_enso_dominante = 'La Niña' THEN -1
+         ELSE 0 END AS fase_enso_num,
+    CASE WHEN fas.clase_aptitud = 'alta' THEN 3
+         WHEN fas.clase_aptitud = 'moderada' THEN 2
+         WHEN fas.clase_aptitud = 'marginal' THEN 1
+         ELSE 0 END AS aptitud_suelo_num
 FROM fact_produccion_agricola fp
 JOIN dim_tiempo dt ON dt.id_tiempo = fp.id_tiempo
+JOIN dim_municipio dm ON dm.id_municipio = fp.id_municipio
 LEFT JOIN clima_anual ca
     ON ca.id_municipio = fp.id_municipio
    AND ca.anio = dt.anio
+LEFT JOIN dim_region_natural drn ON drn.id_region = dm.id_region
+LEFT JOIN enso_anual ea
+    ON ea.anio = dt.anio
+   AND ea.nombre_region = drn.nombre_region
+LEFT JOIN fact_aptitud_suelo fas
+    ON fas.id_municipio = fp.id_municipio
+   AND fas.id_cultivo = fp.id_cultivo
 
 """
 
@@ -59,6 +90,11 @@ def train_and_report(engine=None) -> dict:
         "area_cosechada_ha",
         "produccion_total_ton",
         "precipitacion_mm",
+        "temperatura_media_c",
+        "humedad_relativa_pct",
+        "brillo_solar_horas_dia",
+        "fase_enso_num",
+        "aptitud_suelo_num",
     ]
     X = df[feature_cols].fillna(0)
     y = df["rendimiento_t_ha"].astype(float)

@@ -91,7 +91,9 @@ def load_fact_clima_mensual(engine, df_clima_mensual: pd.DataFrame):
     # 5. Seleccionar columnas del schema
     cols_fact = [
         "id_estacion", "id_municipio", "id_tiempo",
-        "precipitacion_mm"
+        "precipitacion_mm",
+        "temperatura_media_c", "temperatura_max_c", "temperatura_min_c",
+        "humedad_relativa_pct", "brillo_solar_horas_dia",
     ]
     # Asegurar que existen todas las columnas (pueden faltar si no hubo datos de ese sensor)
     for c in cols_fact:

@@ -1,273 +1,260 @@
 """
-run_pipeline.py — Orquestador principal del ETL AgroIA Colombia
-Ejecutar manualmente:   python run_pipeline.py --once
-Ejecutar con scheduler: python run_pipeline.py
+run_pipeline.py — Orquestador profesional del ETL AgroIA Colombia
+Uso: python run_pipeline.py --mode all --once
 """
 import argparse
 import logging
 import sys
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from config.settings import LOGS_DIR
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich import print as rprint
 
-# Logging
+# Configuración de consola profesional
+console = Console()
+
+# Logging (Silencioso en consola, detallado en archivo)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     handlers=[
         logging.FileHandler(LOGS_DIR / "etl_run.log", encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
+        # Eliminamos el StreamHandler de logging para manejarlo con Rich
     ],
 )
 logger = logging.getLogger("pipeline")
 
+def print_banner():
+    console.print(Panel.fit(
+        "[bold green]Plataforma AgroIA Colombia[/bold green]\n"
+        "[dim]Sistema de Inteligencia para la Resiliencia Agrícola 2026[/dim]",
+        border_style="green"
+    ))
 
 def run_core_etl(engine=None):
-    logger.info("=" * 60)
-    logger.info(f"INICIO ETL CORE — {datetime.now().isoformat()}")
-    logger.info("=" * 60)
-
-    from extract.extract_divipola    import extract_divipola
-    from extract.extract_produccion  import extract_produccion
-
-    from clean.clean_municipios      import (
-        agregar_id_municipio,
-        asignar_estaciones_a_municipios,
-        build_region_map_from_divipola,
-    )
-    from clean.clean_clima           import unificar_clima_mensual
-
-    from load.db                     import get_engine, init_schema
-    from load.load_dimensions        import (
-        load_dim_region_natural, load_dim_tiempo,
-        load_dim_municipio, load_dim_cultivo,
-        load_dim_estacion_ideam
-    )
-    from load.load_facts             import load_all_facts, load_fact_clima_mensual
-    from validate.quality_report     import run_quality_report
-
-    if engine is None:
-        engine = get_engine()
-
-    # ── Paso 1: Schema ──────────────────────────
-    logger.info("Paso 1: Inicializando schema...")
-    init_schema(engine)
-
-    # ── Paso 2: Extracción ──────────────────────
-    logger.info("Paso 2: Extrayendo fuentes...")
-    df_divipola    = extract_divipola()
-    df_produccion  = extract_produccion()
+    console.rule("[bold blue]PASO 1: ETL CORE (Producción y Clima)")
     
-    # Normalizar nombres de columnas para el nuevo dataset (Base 2019-2024)
-    rename_map = {
-        "a_o": "anio",
-        "rea_sembrada": "area_sembrada_ha",
-        "rea_cosechada": "area_cosechada_ha",
-        "producci_n": "produccion_total_ton",
-        "rendimiento": "rendimiento_t_ha",
-        "grupo_cultivo": "grupo_de_cultivo",
-        "ciclo_del_cultivo": "ciclo_de_cultivo",
-        "c_digo_dane_municipio": "id_municipio"
-    }
-    df_produccion = df_produccion.rename(columns=rename_map)
-    
-    # Asegurar tipos numéricos (vienen como strings en el JSON)
-    num_cols = ["anio", "area_sembrada_ha", "area_cosechada_ha", "produccion_total_ton", "rendimiento_t_ha"]
-    for col in num_cols:
-        if col in df_produccion.columns:
-            df_produccion[col] = pd.to_numeric(df_produccion[col], errors="coerce")
-    
-    # Rellenar ceros en lugar de NaNs para áreas y producción
-    df_produccion[num_cols[1:]] = df_produccion[num_cols[1:]].fillna(0)
-
-    from extract.extract_ideam_estaciones import extract_estaciones
-    df_estaciones = extract_estaciones()
-
-    from extract.extract_ideam_clima import extract_all_clima
-    df_precip_mensual, df_combinado_mensual = extract_all_clima()
-
-    # ── Paso 3: Dimensiones ─────────────────────
-    logger.info("Paso 3: Cargando dimensiones...")
-    load_dim_region_natural(engine)
-    load_dim_tiempo(engine)
-    df_region_map = build_region_map_from_divipola(df_divipola)
-    load_dim_municipio(engine, df_divipola, df_region_map=df_region_map)
-    
-    df_cultivos = df_produccion[["cultivo", "grupo_de_cultivo", "ciclo_de_cultivo"]].drop_duplicates()
-    df_cultivos = df_cultivos.rename(columns={
-        "cultivo": "nombre_cultivo",
-        "grupo_de_cultivo": "familia_botanica",
-        "ciclo_de_cultivo": "tipo_ciclo"
-    })
-    df_cultivos["nombre_normalizado"] = df_cultivos["nombre_cultivo"].astype(str).str.upper().str.strip()
-    
-    # El CHECK de la BD exige 'transitorio' o 'permanente' (minúsculas)
-    df_cultivos["tipo_ciclo"] = df_cultivos["tipo_ciclo"].astype(str).str.lower()
-    df_cultivos.loc[~df_cultivos["tipo_ciclo"].isin(['transitorio','permanente']), "tipo_ciclo"] = None
-    import numpy as np
-    df_cultivos = df_cultivos.replace({np.nan: None, "nan": None, "None": None})
-    
-    load_dim_cultivo(engine, df_cultivos)
-
-    # ── Paso 4: Limpieza y normalización ────────
-    logger.info("Paso 4: Limpiando y normalizando...")
-    
-    # Si ya tenemos id_municipio (del código DANE), aseguramos 5 dígitos
-    if "id_municipio" in df_produccion.columns:
-        df_produccion["id_municipio"] = df_produccion["id_municipio"].astype(str).str.zfill(5)
-    else:
-        df_produccion = agregar_id_municipio(df_produccion, col_nombre="municipio")
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console
+    ) as progress:
         
-    df_estaciones = asignar_estaciones_a_municipios(df_estaciones, df_divipola, fallback_col="municipio")
-    
-    nulos = df_produccion["id_municipio"].isna().sum()
-    if nulos > 0:
-        logger.warning(f"{nulos} registros de producción sin municipio resuelto")
+        task = progress.add_task("Inicializando componentes...", total=None)
         
-    # Cargar dimensión de estaciones (requiere id_municipio)
-    from load.load_dimensions import load_dim_estacion_ideam
-    df_estaciones_dim = df_estaciones.rename(columns={
-        "codigo": "id_estacion",
-        "nombre": "nombre_estacion",
-        "categoria": "tipo_estacion",
-        "latitud": "latitud",
-        "longitud": "longitud",
-        "altitud": "altitud_msnm"
-    })
-    # Asegurar tipos correctos para la base de datos
-    df_estaciones_dim["latitud"] = pd.to_numeric(df_estaciones_dim["latitud"], errors="coerce")
-    df_estaciones_dim["longitud"] = pd.to_numeric(df_estaciones_dim["longitud"], errors="coerce")
-    df_estaciones_dim["altitud_msnm"] = pd.to_numeric(df_estaciones_dim["altitud_msnm"], errors="coerce")
-    df_estaciones_dim["estado_activa"] = df_estaciones_dim["estado"].astype(str).str.upper() == "ACTIVA"
+        from extract.extract_divipola    import extract_divipola
+        from extract.extract_produccion  import extract_produccion
+        from clean.clean_municipios      import (
+            agregar_id_municipio,
+            asignar_estaciones_a_municipios,
+            build_region_map_from_divipola,
+        )
+        from clean.clean_clima           import unificar_clima_mensual
+        from load.db                     import get_engine, init_schema
+        from load.load_dimensions        import (
+            load_dim_region_natural, load_dim_tiempo,
+            load_dim_municipio, load_dim_cultivo,
+            load_dim_estacion_ideam
+        )
+        from load.load_facts             import load_all_facts, load_fact_clima_mensual
+        from validate.quality_report     import run_quality_report
+
+        if engine is None:
+            engine = get_engine()
+
+        # ── 1. Schema ──
+        progress.update(task, description="[cyan]Configurando base de datos...")
+        init_schema(engine)
+
+        # ── 2. Extracción ──
+        progress.update(task, description="[cyan]Extrayendo DIVIPOLA y Producción A04/A05...")
+        df_divipola    = extract_divipola()
+        df_produccion  = extract_produccion()
+        
+        # Normalización interna de producción
+        rename_map = {
+            "a_o": "anio", "rea_sembrada": "area_sembrada_ha",
+            "rea_cosechada": "area_cosechada_ha", "producci_n": "produccion_total_ton",
+            "rendimiento": "rendimiento_t_ha", "grupo_cultivo": "grupo_de_cultivo",
+            "ciclo_del_cultivo": "ciclo_de_cultivo", "c_digo_dane_municipio": "id_municipio"
+        }
+        df_produccion = df_produccion.rename(columns=rename_map)
+        num_cols = ["anio", "area_sembrada_ha", "area_cosechada_ha", "produccion_total_ton", "rendimiento_t_ha"]
+        for col in num_cols:
+            if col in df_produccion.columns:
+                df_produccion[col] = pd.to_numeric(df_produccion[col], errors="coerce")
+        df_produccion[num_cols[1:]] = df_produccion[num_cols[1:]].fillna(0)
+
+        progress.update(task, description="[cyan]Obteniendo catálogo IDEAM...")
+        from extract.extract_ideam_estaciones import extract_estaciones
+        df_estaciones = extract_estaciones()
+
+        progress.update(task, description="[cyan]Descargando series climáticas (V4)...")
+        from extract.extract_ideam_clima import extract_all_clima
+        df_precip_mensual, df_combinado_mensual = extract_all_clima()
+
+        # ── 3. Dimensiones ──
+        progress.update(task, description="[cyan]Cargando dimensiones maestras...")
+        load_dim_region_natural(engine)
+        load_dim_tiempo(engine)
+        df_region_map = build_region_map_from_divipola(df_divipola)
+        load_dim_municipio(engine, df_divipola, df_region_map=df_region_map)
+        
+        df_cultivos = df_produccion[["cultivo", "grupo_de_cultivo", "ciclo_de_cultivo"]].drop_duplicates()
+        df_cultivos = df_cultivos.rename(columns={
+            "cultivo": "nombre_cultivo", "grupo_de_cultivo": "familia_botanica", "ciclo_de_cultivo": "tipo_ciclo"
+        })
+        df_cultivos["nombre_normalizado"] = df_cultivos["nombre_cultivo"].astype(str).str.upper().str.strip()
+        df_cultivos["tipo_ciclo"] = df_cultivos["tipo_ciclo"].astype(str).str.lower()
+        df_cultivos.loc[~df_cultivos["tipo_ciclo"].isin(['transitorio','permanente']), "tipo_ciclo"] = None
+        df_cultivos = df_cultivos.replace({np.nan: None, "nan": None, "None": None})
+        load_dim_cultivo(engine, df_cultivos)
+
+        # ── 4. Limpieza ──
+        progress.update(task, description="[cyan]Ejecutando limpieza espacial...")
+        if "id_municipio" in df_produccion.columns:
+            df_produccion["id_municipio"] = df_produccion["id_municipio"].astype(str).str.zfill(5)
+        else:
+            df_produccion = agregar_id_municipio(df_produccion, col_nombre="municipio")
+            
+        df_estaciones = asignar_estaciones_a_municipios(df_estaciones, df_divipola, fallback_col="municipio")
+        
+        # Cargar estaciones
+        df_estaciones_dim = df_estaciones.rename(columns={
+            "codigo": "id_estacion", "nombre": "nombre_estacion", "categoria": "tipo_estacion",
+            "latitud": "latitud", "longitud": "longitud", "altitud": "altitud_msnm"
+        })
+        df_estaciones_dim["latitud"] = pd.to_numeric(df_estaciones_dim["latitud"], errors="coerce")
+        df_estaciones_dim["longitud"] = pd.to_numeric(df_estaciones_dim["longitud"], errors="coerce")
+        df_estaciones_dim["estado_activa"] = df_estaciones_dim["estado"].astype(str).str.upper() == "ACTIVA"
+        cols_estacion = ["id_estacion", "nombre_estacion", "tipo_estacion", "latitud", "longitud", "altitud_msnm", "id_municipio", "estado_activa"]
+        df_estaciones_dim = df_estaciones_dim[cols_estacion].dropna(subset=["id_estacion"])
+        df_estaciones_dim = df_estaciones_dim.replace({np.nan: None})
+        load_dim_estacion_ideam(engine, df_estaciones_dim)
+
+        # ── 5/6. Hechos ──
+        progress.update(task, description="[cyan]Cargando hechos de producción y clima...")
+        load_all_facts(engine, df_produccion.dropna(subset=["id_municipio"]), pd.DataFrame())
+        
+        df_clima_mensual = unificar_clima_mensual(df_precip_mensual, df_combinado_mensual)
+        if not df_clima_mensual.empty:
+            load_fact_clima_mensual(engine, df_clima_mensual)
+
+        # ── 7. Calidad ──
+        progress.update(task, description="[cyan]Generando reporte de calidad...")
+        reporte = run_quality_report(engine)
+        progress.update(task, description="[bold green]ETL CORE Completado.")
+
+    # Mostrar reporte de calidad elegante
+    table = Table(title="Reporte de Calidad de Datos", box=None)
+    table.add_column("Indicador", style="cyan")
+    table.add_column("Valor", justify="right")
+    table.add_column("Estado", justify="center")
+
+    for _, row in reporte.iterrows():
+        color = "green" if row["estado"] == "OK" else "bold red"
+        table.add_row(row["indicador"], str(row["valor"]), f"[{color}]{row['estado']}[/{color}]")
     
-    # Solo tomamos las columnas del esquema
-    cols_estacion = ["id_estacion", "nombre_estacion", "tipo_estacion", "latitud", "longitud", "altitud_msnm", "id_municipio", "estado_activa"]
-    df_estaciones_dim = df_estaciones_dim[cols_estacion].dropna(subset=["id_estacion"])
-    df_estaciones_dim = df_estaciones_dim.replace({np.nan: None})
-    load_dim_estacion_ideam(engine, df_estaciones_dim)
-    df_produccion = df_produccion.dropna(subset=["id_municipio"])
-
-    # ── Paso 5: Hechos de producción ─────────────
-    logger.info("Paso 5: Cargando hechos de producción...")
-    load_all_facts(engine, df_produccion, pd.DataFrame())
-
-    # ── Paso 6: Hechos climáticos ────────────────
-    logger.info("Paso 6: Unificando clima a granularidad mensual...")
-    df_clima_mensual = unificar_clima_mensual(df_precip_mensual, df_combinado_mensual)
-    if not df_clima_mensual.empty:
-        load_fact_clima_mensual(engine, df_clima_mensual)
-    else:
-        logger.info("Sin datos climáticos por ahora — se poblarán en futuras ejecuciones")
-
-    # ── Paso 7: Validación de calidad ───────────
-    logger.info("Paso 7: Validando calidad de datos...")
-    reporte = run_quality_report(engine)
-    alertas = reporte[reporte["estado"] == "ALERTA"]
-    if not alertas.empty:
-        logger.warning(f"ALERTAS DE CALIDAD:\n{alertas.to_string(index=False)}")
-    else:
-        logger.info("Todos los indicadores de calidad en estado OK")
-
-    logger.info(f"FIN ETL CORE — {datetime.now().isoformat()}")
-    logger.info("=" * 60)
-    return {
-        "df_divipola": df_divipola,
-        "df_produccion": df_produccion,
-        "df_estaciones": df_estaciones,
-        "df_clima_mensual": df_clima_mensual,
-        "quality_report": reporte,
-    }
+    console.print(table)
+    return reporte
 
 
 def run_extended_etl(engine=None):
-    logger.info("INICIO ETL EXTENDIDO — %s", datetime.now().isoformat())
-
-    from load.db import get_engine
-    from extract.extract_ideam_pdf import extract_all_boletines
-    from extract.extract_sipsa import extract_sipsa
-    from extract.extract_sipra import extract_sipra
-    from clean.clean_precios import normalizar_precios_sipsa, construir_dim_centrales
-    from clean.clean_suelo import resumir_aptitud_suelo_por_municipio
-    from load.load_dimensions import load_dim_central_abastos
-    from load.load_facts import (
-        load_fact_alerta_enso,
-        load_fact_precios_mayoristas,
-        load_fact_aptitud_suelo,
-        load_fact_censo_agropecuario,
-        load_fact_precios_insumos,
-    )
-    from extract.extract_insumos import extract_insumos_ipia
-    from clean.clean_insumos import clean_insumos_ipia
-    from clean.clean_boletines import clean_boletines_enso
-    from extract.extract_divipola import extract_divipola
-    from extract.extract_cna import extract_cna
+    console.rule("[bold magenta]PASO 2: ETL EXTENDIDO (Insumos, Suelos, Alertas)")
     
-    if engine is None:
-        engine = get_engine()
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console
+    ) as progress:
+        
+        task = progress.add_task("Iniciando procesos extendidos...", total=None)
 
-    df_boletines_raw = extract_all_boletines()
-    df_boletines = clean_boletines_enso()
-    if not df_boletines.empty:
-        load_fact_alerta_enso(engine, df_boletines)
-    else:
-        logger.info("ENSO: sin boletines configurados o detectados")
+        from load.db import get_engine
+        from extract.extract_ideam_pdf import extract_all_boletines
+        from extract.extract_sipsa import extract_sipsa
+        from extract.extract_sipra import extract_sipra
+        from clean.clean_precios import normalizar_precios_sipsa, construir_dim_centrales
+        from clean.clean_suelo import resumir_aptitud_suelo_por_municipio
+        from load.load_dimensions import load_dim_central_abastos
+        from load.load_facts import (
+            load_fact_alerta_enso, load_fact_precios_mayoristas,
+            load_fact_aptitud_suelo, load_fact_censo_agropecuario,
+            load_fact_precios_insumos
+        )
+        from extract.extract_insumos import extract_insumos_ipia
+        from clean.clean_insumos import clean_insumos_ipia
+        from clean.clean_boletines import clean_boletines_enso
+        from extract.extract_divipola import extract_divipola
+        from extract.extract_cna import extract_cna
+        
+        if engine is None:
+            engine = get_engine()
 
-    df_insumos_raw = extract_insumos_ipia()
-    df_insumos = clean_insumos_ipia()
-    if not df_insumos.empty:
-        load_fact_precios_insumos(engine, df_insumos)
-    else:
-        logger.info("IPIA: no se pudieron obtener precios de insumos")
+        # Boletines ENSO
+        progress.update(task, description="[magenta]Procesando Boletines Agroclimáticos (PDF)...")
+        extract_all_boletines()
+        df_boletines = clean_boletines_enso()
+        if not df_boletines.empty:
+            load_fact_alerta_enso(engine, df_boletines)
 
-    df_sipsa_raw = extract_sipsa()
-    df_precios = normalizar_precios_sipsa(df_sipsa_raw)
-    if not df_precios.empty:
-        df_centrales = construir_dim_centrales(df_precios)
-        if not df_centrales.empty:
-            load_dim_central_abastos(engine, df_centrales)
-        load_fact_precios_mayoristas(engine, df_precios)
-    else:
-        logger.info("SIPSA: no se pudo automatizar los precios")
+        # Insumos IPIA
+        progress.update(task, description="[magenta]Actualizando Precios de Insumos (IPIA)...")
+        extract_insumos_ipia()
+        df_insumos = clean_insumos_ipia()
+        if not df_insumos.empty:
+            load_fact_precios_insumos(engine, df_insumos)
 
-    df_divipola = extract_divipola()
-    df_sipra = extract_sipra()
-    df_suelo = resumir_aptitud_suelo_por_municipio(df_sipra, df_divipola)
-    if not df_suelo.empty:
-        load_fact_aptitud_suelo(engine, df_suelo)
-    else:
-        logger.info("SIPRA: sin capas suficientes para generar fact_aptitud_suelo")
+        # SIPSA
+        progress.update(task, description="[magenta]Obteniendo Precios Mayoristas (SIPSA)...")
+        df_sipsa_raw = extract_sipsa()
+        df_precios = normalizar_precios_sipsa(df_sipsa_raw)
+        if not df_precios.empty:
+            df_centrales = construir_dim_centrales(df_precios)
+            if not df_centrales.empty:
+                load_dim_central_abastos(engine, df_centrales)
+            load_fact_precios_mayoristas(engine, df_precios)
 
-    df_censo = extract_cna()
-    if not df_censo.empty:
-        load_fact_censo_agropecuario(engine, df_censo)
-    else:
-        logger.info("CNA: no se pudo automatizar el censo agropecuario")
+        # SIPRA (Suelos)
+        progress.update(task, description="[magenta]Analizando Aptitud de Suelos (SIPRA)...")
+        df_divipola = extract_divipola()
+        df_sipra = extract_sipra()
+        df_suelo = resumir_aptitud_suelo_por_municipio(df_sipra, df_divipola)
+        if not df_suelo.empty:
+            load_fact_aptitud_suelo(engine, df_suelo)
 
-    logger.info("FIN ETL EXTENDIDO — %s", datetime.now().isoformat())
+        # CNA
+        progress.update(task, description="[magenta]Consolidando Censo Agropecuario (CNA)...")
+        df_censo = extract_cna()
+        if not df_censo.empty:
+            load_fact_censo_agropecuario(engine, df_censo)
+
+        progress.update(task, description="[bold green]ETL EXTENDIDO Completado.")
 
 
 def run_etl(mode: str = "all"):
+    print_banner()
     from load.db import get_engine
-
     engine = get_engine()
-    result = None
+    
     if mode in {"core", "all"}:
-        result = run_core_etl(engine=engine)
+        run_core_etl(engine=engine)
+    
     if mode in {"extended", "all"}:
         run_extended_etl(engine=engine)
-    return result
+    
+    console.print("\n[bold green]✅ Pipeline finalizado con éxito.[/bold green]")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--once", action="store_true",
-                        help="Ejecutar el pipeline una sola vez y salir")
-    parser.add_argument(
-        "--mode",
-        choices=["core", "extended", "all"],
-        default="all",
-        help="Selecciona qué parte del pipeline ejecutar",
-    )
+    parser = argparse.ArgumentParser(description="Orquestador AgroIA ETL")
+    parser.add_argument("--once", action="store_true", help="Ejecuta una vez y sale")
+    parser.add_argument("--mode", choices=["core", "extended", "all"], default="all", help="Modo de ejecución")
     args = parser.parse_args()
 
     if args.once:
@@ -275,11 +262,16 @@ if __name__ == "__main__":
     else:
         from apscheduler.schedulers.blocking import BlockingScheduler
         scheduler = BlockingScheduler(timezone="America/Bogota")
-        # Ejecutar todos los lunes a las 2 AM (hora Colombia)
-        scheduler.add_job(run_etl, "cron", day_of_week="mon", hour=2, minute=0, kwargs={"mode": "core"})
-        logger.info("Scheduler activo — pipeline CORE programado los lunes a las 02:00 (Bogotá)")
-        logger.info("Ctrl+C para detener")
+        scheduler.add_job(run_etl, "cron", day_of_week="mon", hour=2, minute=0, kwargs={"mode": "all"})
+        
+        console.print(Panel(
+            "[bold cyan]MODO SCHEDULER ACTIVO[/bold cyan]\n"
+            "Ejecución programada: [yellow]Todos los Lunes a las 02:00 AM (Bogotá)[/yellow]\n"
+            "Presione [bold red]Ctrl+C[/bold red] para detener.",
+            title="Reloj de Control"
+        ))
+        
         try:
             scheduler.start()
-        except KeyboardInterrupt:
-            logger.info("Scheduler detenido manualmente")
+        except (KeyboardInterrupt, SystemExit):
+            console.print("\n[bold red]Scheduler detenido manualmente.[/bold red]")
