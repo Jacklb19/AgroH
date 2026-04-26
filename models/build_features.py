@@ -1,5 +1,6 @@
 import logging
 
+import numpy as np
 import pandas as pd
 
 from load.db import get_engine
@@ -159,11 +160,21 @@ def build_ml_features(engine=None):
 
         grupo_cultivo = df_features.groupby(["id_municipio", "id_cultivo"], sort=False)
         grupo_municipio = df_features.groupby(["id_municipio"], sort=False)
+        grupo_departamento_cultivo = df_features.groupby(
+            ["id_departamento", "id_cultivo"], sort=False
+        )
+        grupo_region_cultivo = df_features.groupby(["id_region", "id_cultivo"], sort=False)
 
         df_features["rendimiento_lag_1"] = grupo_cultivo["rendimiento_t_ha"].shift(1)
         df_features["rendimiento_promedio_3"] = grupo_cultivo["rendimiento_t_ha"].transform(
             lambda serie: serie.shift(1).rolling(window=3, min_periods=1).mean()
         )
+        df_features["rendimiento_departamento_cultivo_lag_1"] = grupo_departamento_cultivo[
+            "rendimiento_t_ha"
+        ].shift(1)
+        df_features["rendimiento_region_cultivo_promedio_3"] = grupo_region_cultivo[
+            "rendimiento_t_ha"
+        ].transform(lambda serie: serie.shift(1).rolling(window=3, min_periods=1).mean())
         df_features["area_sembrada_lag_1"] = grupo_cultivo["area_sembrada_ha"].shift(1)
         df_features["lluvia_lag_1"] = grupo_municipio["lluvia_acumulada_anual"].shift(1)
         df_features["temp_promedio_lag_1"] = grupo_municipio["temp_promedio_anual"].shift(1)
@@ -175,6 +186,17 @@ def build_ml_features(engine=None):
         df_features["variacion_precio_interanual"] = (
             df_features["precio_promedio_anual_cop_kg"] - df_features["precio_lag_1"]
         )
+        total_area_territorial = (
+            df_features["area_cultivos_permanentes_ha"].fillna(0)
+            + df_features["area_cultivos_transitorios_ha"].fillna(0)
+        )
+        df_features["participacion_area_sembrada"] = np.where(
+            total_area_territorial > 0,
+            df_features["area_sembrada_ha"] / total_area_territorial,
+            None,
+        )
+        df_features["flag_rendimiento_lag_disponible"] = df_features["rendimiento_lag_1"].notna().astype(int)
+        df_features["flag_costo_insumos_disponible"] = df_features["costo_promedio_insumos_region"].notna().astype(int)
 
         logger.info(
             "Feature Store construido: %s filas (una fila = un ano de cosecha).",

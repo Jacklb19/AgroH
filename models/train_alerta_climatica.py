@@ -62,6 +62,15 @@ def _etiquetar_riesgo(row: pd.Series) -> str:
     Regla heuristica para generar una etiqueta operativa cuando no hay
     verdad terreno historica validada por expertos.
     """
+    score = _puntaje_riesgo(row)
+    if score >= 4:
+        return "ALTO"
+    if score >= 2:
+        return "MEDIO"
+    return "BAJO"
+
+
+def _puntaje_riesgo(row: pd.Series) -> int:
     score = 0
 
     spi = row.get("indice_spi", 0) or 0
@@ -94,15 +103,23 @@ def _etiquetar_riesgo(row: pd.Series) -> str:
     elif temp_max > 35:
         score += 1
 
+    precip_anomalia = row.get("precipitacion_anomalia_pct", 0) or 0
+    if abs(precip_anomalia) > 60:
+        score += 2
+    elif abs(precip_anomalia) > 30:
+        score += 1
+
+    temp_anomalia = row.get("temperatura_max_anomalia_c", 0) or 0
+    if temp_anomalia > 3:
+        score += 2
+    elif temp_anomalia > 1.5:
+        score += 1
+
     fase = str(row.get("fase_enso", "Neutro"))
     if fase in ("El Nino", "La Nina", "El Niño", "La Niña"):
         score += 1
 
-    if score >= 5:
-        return "ALTO"
-    if score >= 2:
-        return "MEDIO"
-    return "BAJO"
+    return score
 
 
 def load_training_frame(engine) -> pd.DataFrame:
@@ -136,6 +153,44 @@ def _temporal_alert_split(df: pd.DataFrame, min_test_periods: int = 6):
     if not train_mask.any() or not test_mask.any():
         raise ValueError("No fue posible construir una validacion temporal para alertas.")
     return train_mask, test_mask, sorted(test_periods)
+
+
+def _enriquecer_features_climaticas(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df = df.sort_values(["id_municipio", "anio", "mes"])
+    grupo_municipio_mes = df.groupby(["id_municipio", "mes"], sort=False)
+    df["precipitacion_media_mes"] = grupo_municipio_mes["precipitacion_mm"].transform(
+        lambda serie: serie.shift(1).expanding(min_periods=1).mean()
+    )
+    df["temperatura_max_media_mes"] = grupo_municipio_mes["temperatura_max_c"].transform(
+        lambda serie: serie.shift(1).expanding(min_periods=1).mean()
+    )
+    df["humedad_media_mes"] = grupo_municipio_mes["humedad_relativa_pct"].transform(
+        lambda serie: serie.shift(1).expanding(min_periods=1).mean()
+    )
+
+    df["precipitacion_anomalia_pct"] = np.where(
+        df["precipitacion_media_mes"].fillna(0) > 0,
+        ((df["precipitacion_mm"] - df["precipitacion_media_mes"]) / df["precipitacion_media_mes"]) * 100,
+        0,
+    )
+    df["temperatura_max_anomalia_c"] = (
+        df["temperatura_max_c"] - df["temperatura_max_media_mes"]
+    )
+    df["humedad_anomalia_pct"] = df["humedad_relativa_pct"] - df["humedad_media_mes"]
+
+    grupo_municipio = df.groupby("id_municipio", sort=False)
+    df["precipitacion_lag_1"] = grupo_municipio["precipitacion_mm"].shift(1)
+    df["temperatura_max_lag_1"] = grupo_municipio["temperatura_max_c"].shift(1)
+    df["precipitacion_promedio_3"] = grupo_municipio["precipitacion_mm"].transform(
+        lambda serie: serie.shift(1).rolling(window=3, min_periods=1).mean()
+    )
+    df["temperatura_max_promedio_3"] = grupo_municipio["temperatura_max_c"].transform(
+        lambda serie: serie.shift(1).rolling(window=3, min_periods=1).mean()
+    )
+    df["flag_enso_activo"] = df["fase_enso"].isin(["El Nino", "La Nina", "El Niño", "La Niña"]).astype(int)
+    df["puntaje_riesgo_heuristico"] = df.apply(_puntaje_riesgo, axis=1)
+    return df
 
 
 def _registrar_version(engine, model_name: str, metrics: dict) -> int | None:
@@ -197,6 +252,7 @@ def train_and_report(engine=None) -> dict:
             "No hay datos climaticos suficientes para entrenar el modelo de alertas."
         )
 
+    df = _enriquecer_features_climaticas(df)
     df["nivel_riesgo"] = df.apply(_etiquetar_riesgo, axis=1)
     logger.info("Distribucion de etiquetas:\n%s", df["nivel_riesgo"].value_counts().to_string())
 
@@ -209,10 +265,18 @@ def train_and_report(engine=None) -> dict:
         "humedad_relativa_pct",
         "brillo_solar_horas_dia",
         "fase_enso_enc",
+        "flag_enso_activo",
         "indice_spi",
         "anomalia_precipitacion_pct",
+        "precipitacion_anomalia_pct",
+        "temperatura_max_anomalia_c",
+        "humedad_anomalia_pct",
         "prob_deficit",
         "prob_exceso",
+        "precipitacion_lag_1",
+        "temperatura_max_lag_1",
+        "precipitacion_promedio_3",
+        "temperatura_max_promedio_3",
         "anio",
         "mes",
     ]
@@ -313,7 +377,11 @@ def train_and_report(engine=None) -> dict:
     df_pred = df[["id_municipio", "id_tiempo"]].copy()
     df_pred["nivel_riesgo"] = [inv_label_map[pred] for pred in pred_todas]
     df_pred["tipo_evento"] = df["fase_enso"].values
-    df_pred["score_probabilidad"] = score_todas.max(axis=1)
+    score_hibrido = np.maximum(
+        score_todas.max(axis=1),
+        np.clip(df["puntaje_riesgo_heuristico"].astype(float) / 4.0, 0, 0.99),
+    )
+    df_pred["score_probabilidad"] = score_hibrido
     df_pred["descripcion_generada"] = df_pred.apply(
         lambda row: (
             f"Alerta {row['nivel_riesgo']} - Fase ENSO: {row['tipo_evento']}. "

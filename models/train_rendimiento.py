@@ -48,6 +48,7 @@ def _guardar_predicciones(engine, df_pred: pd.DataFrame, id_version: int | None)
     Inserta o actualiza pred_rendimiento con las predicciones del modelo.
     """
     from load.db import upsert
+    from sqlalchemy import text
 
     df_pred = df_pred.copy()
     df_pred["id_version"] = id_version
@@ -67,6 +68,21 @@ def _guardar_predicciones(engine, df_pred: pd.DataFrame, id_version: int | None)
             df_pred[column] = None
 
     df_out = df_pred[cols].drop_duplicates(subset=["id_municipio", "id_cultivo", "id_tiempo"])
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                DELETE FROM pred_rendimiento pr
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM fact_produccion_agricola fp
+                    WHERE fp.id_municipio = pr.id_municipio
+                      AND fp.id_cultivo = pr.id_cultivo
+                      AND fp.id_tiempo = pr.id_tiempo
+                )
+                """
+            )
+        )
     upsert(engine, "pred_rendimiento", df_out, ["id_municipio", "id_cultivo", "id_tiempo"])
     logger.info("pred_rendimiento: %s predicciones guardadas", len(df_out))
 
@@ -111,6 +127,60 @@ def _historical_baseline(df: pd.DataFrame, train_mask: pd.Series, y_train: pd.Se
     return baseline
 
 
+def _select_blend_alpha(
+    df: pd.DataFrame,
+    X: pd.DataFrame,
+    y: pd.Series,
+    train_mask: pd.Series,
+    feature_cols: list[str],
+) -> float:
+    train_years = sorted(int(year) for year in df.loc[train_mask, "anio"].dropna().unique())
+    if len(train_years) < 3:
+        return 0.0
+
+    calibration_year = train_years[-1]
+    subtrain_mask = train_mask & (df["anio"] < calibration_year)
+    calibration_mask = train_mask & (df["anio"] == calibration_year)
+    if not subtrain_mask.any() or not calibration_mask.any():
+        return 0.0
+
+    try:
+        from xgboost import XGBRegressor
+
+        model = XGBRegressor(
+            n_estimators=250,
+            max_depth=6,
+            learning_rate=0.05,
+            subsample=0.85,
+            colsample_bytree=0.85,
+            reg_lambda=1.0,
+            random_state=42,
+            objective="reg:squarederror",
+        )
+    except ImportError:
+        from sklearn.ensemble import GradientBoostingRegressor
+
+        model = GradientBoostingRegressor(random_state=42)
+
+    from sklearn.metrics import mean_squared_error
+
+    baseline_subtrain = _historical_baseline(df, subtrain_mask, y.loc[subtrain_mask])
+    baseline_calibration = baseline_subtrain.loc[calibration_mask]
+    residual_subtrain = y.loc[subtrain_mask] - baseline_subtrain.loc[subtrain_mask]
+    model.fit(X.loc[subtrain_mask, feature_cols], residual_subtrain)
+    model_calibration = baseline_calibration + model.predict(X.loc[calibration_mask, feature_cols])
+
+    best_alpha = 0.0
+    best_rmse = float(mean_squared_error(y.loc[calibration_mask], baseline_calibration) ** 0.5)
+    for alpha in [i / 10 for i in range(1, 10)]:
+        pred = (1 - alpha) * baseline_calibration + alpha * model_calibration
+        rmse = float(mean_squared_error(y.loc[calibration_mask], pred) ** 0.5)
+        if rmse < best_rmse:
+            best_alpha = alpha
+            best_rmse = rmse
+    return best_alpha
+
+
 def train_and_report(engine=None) -> dict:
     """
     Entrena un modelo tabular de rendimiento agricola con validacion temporal.
@@ -146,8 +216,11 @@ def train_and_report(engine=None) -> dict:
         "aptitud_score",
         "area_cultivos_permanentes_ha",
         "area_cultivos_transitorios_ha",
+        "participacion_area_sembrada",
         "rendimiento_lag_1",
         "rendimiento_promedio_3",
+        "rendimiento_departamento_cultivo_lag_1",
+        "rendimiento_region_cultivo_promedio_3",
         "area_sembrada_lag_1",
         "lluvia_lag_1",
         "temp_promedio_lag_1",
@@ -155,10 +228,19 @@ def train_and_report(engine=None) -> dict:
         "costo_insumos_lag_1",
         "variacion_lluvia_interanual",
         "variacion_precio_interanual",
+        "flag_rendimiento_lag_disponible",
+        "flag_costo_insumos_disponible",
     ]
 
-    X = df[feature_cols].apply(pd.to_numeric, errors="coerce")
-    X = X.fillna(X.median(numeric_only=True)).fillna(0)
+    X_raw = df[feature_cols].apply(pd.to_numeric, errors="coerce")
+    feature_cols = [
+        column
+        for column in feature_cols
+        if column in X_raw.columns
+        and X_raw[column].notna().any()
+        and X_raw[column].nunique(dropna=True) > 1
+    ]
+    X = X_raw[feature_cols].fillna(X_raw[feature_cols].median(numeric_only=True)).fillna(0)
     y = df["rendimiento_t_ha"].astype(float)
 
     train_mask, test_mask, test_years = _temporal_train_test_split(df)
@@ -189,6 +271,7 @@ def train_and_report(engine=None) -> dict:
 
     from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+    blend_alpha = _select_blend_alpha(df, X, y, train_mask, feature_cols)
     baseline_hist = _historical_baseline(df, train_mask, y_train)
     baseline_train = baseline_hist.loc[train_mask]
     baseline_test = baseline_hist.loc[test_mask]
@@ -214,8 +297,32 @@ def train_and_report(engine=None) -> dict:
     baseline_lag1_mae = float(mean_absolute_error(y_test, baseline_lag1_pred))
     baseline_lag1_rmse = float(mean_squared_error(y_test, baseline_lag1_pred) ** 0.5)
 
-    champion_strategy = "lag1_historial" if baseline_lag1_rmse <= rmse else "xgboost_residual"
-    champion_test_pred = baseline_lag1_pred if champion_strategy == "lag1_historial" else pred_test
+    pred_blend_test = (1 - blend_alpha) * baseline_test + blend_alpha * pred_test
+    blend_mae = float(mean_absolute_error(y_test, pred_blend_test))
+    blend_rmse = float(mean_squared_error(y_test, pred_blend_test) ** 0.5)
+
+    candidates = {
+        "lag1_historial": {
+            "pred": baseline_lag1_pred,
+            "mae": baseline_lag1_mae,
+            "rmse": baseline_lag1_rmse,
+        },
+        "xgboost_residual": {
+            "pred": pred_test,
+            "mae": mae,
+            "rmse": rmse,
+        },
+        "blend_lag1_xgboost": {
+            "pred": pred_blend_test,
+            "mae": blend_mae,
+            "rmse": blend_rmse,
+        },
+    }
+    champion_strategy = min(
+        candidates,
+        key=lambda name: (candidates[name]["rmse"], candidates[name]["mae"]),
+    )
+    champion_test_pred = candidates[champion_strategy]["pred"]
     champion_mae = float(mean_absolute_error(y_test, champion_test_pred))
     champion_rmse = float(mean_squared_error(y_test, champion_test_pred) ** 0.5)
     interval_width = max(champion_mae, float(np.std(y_test - champion_test_pred)))
@@ -227,6 +334,7 @@ def train_and_report(engine=None) -> dict:
         "n_test": int(len(X_test)),
         "split_strategy": "temporal_holdout",
         "test_years": test_years,
+        "blend_alpha": blend_alpha,
         "champion_strategy": champion_strategy,
         "champion_mae": champion_mae,
         "champion_rmse": champion_rmse,
@@ -243,6 +351,10 @@ def train_and_report(engine=None) -> dict:
                 "mae": baseline_lag1_mae,
                 "rmse": baseline_lag1_rmse,
             },
+            "blend_lag1_xgboost": {
+                "mae": blend_mae,
+                "rmse": blend_rmse,
+            },
         },
         "top_feature_importance": _feature_importance(model, feature_cols),
     }
@@ -251,7 +363,13 @@ def train_and_report(engine=None) -> dict:
     id_version = _registrar_version(engine, model_name, metrics)
 
     pred_modelo_todas = baseline_hist + model.predict(X)
-    pred_todas = baseline_hist if champion_strategy == "lag1_historial" else pred_modelo_todas
+    pred_blend_todas = (1 - blend_alpha) * baseline_hist + blend_alpha * pred_modelo_todas
+    if champion_strategy == "lag1_historial":
+        pred_todas = baseline_hist
+    elif champion_strategy == "blend_lag1_xgboost":
+        pred_todas = pred_blend_todas
+    else:
+        pred_todas = pred_modelo_todas
     df_pred = df[["id_municipio", "id_cultivo", "id_tiempo"]].copy()
     df_pred["rendimiento_predicho_t_ha"] = pred_todas
     df_pred["intervalo_confianza_inferior"] = pred_todas - interval_width
