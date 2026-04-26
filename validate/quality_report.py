@@ -32,8 +32,16 @@ CHECKS = [
     },
     {
         "nombre": "modelos_activos_duplicados",
-        "sql": "SELECT COUNT(*) AS pct FROM model_version WHERE activo = TRUE",
-        "umbral_max": 1,
+        "sql": """
+            SELECT COALESCE(SUM(GREATEST(cnt - 1, 0)), 0)::FLOAT AS pct
+            FROM (
+                SELECT nombre_modelo, COUNT(*) AS cnt
+                FROM model_version
+                WHERE activo = TRUE
+                GROUP BY nombre_modelo
+            ) t
+        """,
+        "umbral_max": 0,
         "mensaje": "Número de modelos activos en producción (debe ser <= 1)",
     },
     {

@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -45,7 +46,7 @@ SPATIAL_JOIN_RADIUS_KM = 50
 
 # Período histórico producción
 YEAR_START = 2007
-YEAR_END   = 2025
+YEAR_END   = int(os.getenv("PIPELINE_YEAR_END", datetime.now().year))
 
 # Período histórico clima (más corto para descargas rápidas, ampliar después)
 CLIMA_YEAR_START = 2018
