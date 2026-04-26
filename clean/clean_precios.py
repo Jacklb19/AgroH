@@ -51,6 +51,13 @@ def normalizar_precios_sipsa(df_raw: pd.DataFrame) -> pd.DataFrame:
 
     df["fecha_registro"] = pd.to_datetime(df["fecha_registro"], errors="coerce")
     df = df.dropna(subset=["fecha_registro", "producto", "nombre_central", "ciudad"])
+    for col in ["producto", "nombre_central", "ciudad"]:
+        df[col] = (
+            df[col]
+            .astype(str)
+            .str.replace(r"\s+", " ", regex=True)
+            .str.strip()
+        )
     df["anio"] = df["fecha_registro"].dt.year
     df["mes"] = df["fecha_registro"].dt.month
 

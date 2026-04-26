@@ -16,7 +16,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import print as rprint
 
 # Configuración de consola profesional
-console = Console()
+console = Console(safe_box=True, legacy_windows=False)
 
 # Logging (Silencioso en consola, detallado en archivo)
 logging.basicConfig(
@@ -40,7 +40,6 @@ def run_core_etl(engine=None):
     console.rule("[bold blue]PASO 1: ETL CORE (Producción y Clima)")
     
     with Progress(
-        SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console
     ) as progress:
@@ -168,47 +167,48 @@ def run_extended_etl(engine=None):
     console.rule("[bold magenta]PASO 2: ETL EXTENDIDO (Insumos, Suelos, Alertas)")
     
     with Progress(
-        SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console
     ) as progress:
         
         task = progress.add_task("Iniciando procesos extendidos...", total=None)
 
-        from load.db import get_engine
-        from extract.extract_ideam_pdf import extract_all_boletines
+        from load.db import get_engine, init_schema
+        from extract.extract_noaa_enso import extract_noaa_enso
         from extract.extract_sipsa import extract_sipsa
         from extract.extract_sipra import extract_sipra
         from clean.clean_precios import normalizar_precios_sipsa, construir_dim_centrales
         from clean.clean_suelo import resumir_aptitud_suelo_por_municipio
-        from load.load_dimensions import load_dim_central_abastos
+        from load.load_dimensions import load_dim_central_abastos, load_dim_region_natural, load_dim_tiempo
         from load.load_facts import (
             load_fact_alerta_enso, load_fact_precios_mayoristas,
             load_fact_aptitud_suelo, load_fact_censo_agropecuario,
             load_fact_precios_insumos
         )
-        from extract.extract_insumos import extract_insumos_ipia
-        from clean.clean_insumos import clean_insumos_ipia
-        from clean.clean_boletines import clean_boletines_enso
+        from extract.extract_insumos import extract_insumos
+        from clean.clean_insumos import normalizar_insumos
         from extract.extract_divipola import extract_divipola
         from extract.extract_cna import extract_cna
         
         if engine is None:
             engine = get_engine()
+        init_schema(engine)
+        load_dim_region_natural(engine)
+        load_dim_tiempo(engine)
 
-        # Boletines ENSO
-        progress.update(task, description="[magenta]Procesando Boletines Agroclimáticos (PDF)...")
-        extract_all_boletines()
-        df_boletines = clean_boletines_enso()
+        # Boletines ENSO (Reemplazado por NOAA API)
+        progress.update(task, description="[magenta]Procesando Índice ONI ENSO (NOAA)...")
+        df_boletines = extract_noaa_enso()
         if not df_boletines.empty:
             load_fact_alerta_enso(engine, df_boletines)
 
-        # Insumos IPIA
+        # Insumos (Usando el extractor robusto con datos sintéticos)
         progress.update(task, description="[magenta]Actualizando Precios de Insumos (IPIA)...")
-        extract_insumos_ipia()
-        df_insumos = clean_insumos_ipia()
-        if not df_insumos.empty:
-            load_fact_precios_insumos(engine, df_insumos)
+        df_insumos_raw = extract_insumos()
+        if not df_insumos_raw.empty:
+            df_insumos = normalizar_insumos(df_insumos_raw)
+            if not df_insumos.empty:
+                load_fact_precios_insumos(engine, df_insumos)
 
         # SIPSA
         progress.update(task, description="[magenta]Obteniendo Precios Mayoristas (SIPSA)...")
@@ -237,6 +237,46 @@ def run_extended_etl(engine=None):
         progress.update(task, description="[bold green]ETL EXTENDIDO Completado.")
 
 
+def run_models(engine=None):
+    console.rule("[bold yellow]PASO 3: FEATURE STORE Y MACHINE LEARNING")
+    failures = []
+    
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        console=console
+    ) as progress:
+        task = progress.add_task("Construyendo variables para ML...", total=None)
+        
+        from models.build_features import build_ml_features
+        df_features = build_ml_features(engine)
+        if df_features.empty:
+            raise RuntimeError("No fue posible construir el feature store")
+        
+        progress.update(task, description="[yellow]Entrenando Modelo: Rendimiento Agrícola...")
+        try:
+            from models.train_rendimiento import train_and_report as train_rendimiento
+            r1 = train_rendimiento(engine=engine)
+            logger.info(f"Rendimiento — R²: {r1['metrics']['r2']:.4f}")
+        except Exception as exc:
+            failures.append(f"rendimiento: {exc}")
+            logger.exception("Modelo rendimiento fallo")
+
+        progress.update(task, description="[yellow]Entrenando Modelo: Alerta Climática...")
+        try:
+            from models.train_alerta_climatica import train_and_report as train_alerta
+            r2 = train_alerta(engine=engine)
+            logger.info(f"Alerta climática — F1: {r2['metrics']['f1_weighted']:.4f}")
+        except Exception as exc:
+            failures.append(f"alerta_climatica: {exc}")
+            logger.exception("Modelo alerta climatica fallo")
+
+        if failures:
+            progress.update(task, description="[bold red]MODELOS IA con errores.")
+            raise RuntimeError(" ; ".join(failures))
+
+        progress.update(task, description="[bold green]MODELOS IA Completados.")
+
+
 def run_etl(mode: str = "all"):
     print_banner()
     from load.db import get_engine
@@ -247,14 +287,17 @@ def run_etl(mode: str = "all"):
     
     if mode in {"extended", "all"}:
         run_extended_etl(engine=engine)
+        
+    if mode in {"models", "all"}:
+        run_models(engine=engine)
     
-    console.print("\n[bold green]✅ Pipeline finalizado con éxito.[/bold green]")
+    console.print("\n[bold green][OK] Pipeline finalizado con exito.[/bold green]")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Orquestador AgroIA ETL")
     parser.add_argument("--once", action="store_true", help="Ejecuta una vez y sale")
-    parser.add_argument("--mode", choices=["core", "extended", "all"], default="all", help="Modo de ejecución")
+    parser.add_argument("--mode", choices=["core", "extended", "models", "all"], default="all", help="Modo de ejecución")
     args = parser.parse_args()
 
     if args.once:

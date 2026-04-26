@@ -53,6 +53,8 @@ def unificar_clima_mensual(df_precip: pd.DataFrame,
             df_c["max_valor"] = df_c.get("promedio_valor")
         if "min_valor" not in df_c.columns:
             df_c["min_valor"] = df_c.get("promedio_valor")
+        for col in ["promedio_valor", "max_valor", "min_valor"]:
+            df_c[col] = pd.to_numeric(df_c[col], errors="coerce")
         df_c["variable"] = "otro"
         sensor = df_c["descripcionsensor"].astype(str).str.lower()
         df_c.loc[sensor.str.contains("temperatura|temp", na=False), "variable"] = "temperatura_media_c"

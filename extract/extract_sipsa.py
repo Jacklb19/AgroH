@@ -38,8 +38,13 @@ def extract_sipsa() -> pd.DataFrame:
     url_base = 'https://www.dane.gov.co/index.php/estadisticas-por-tema/agropecuario/sistema-de-informacion-de-precios-sipsa/componente-precios-mayoristas'
     
     try:
-        r = requests.get(url_base, verify=False, timeout=30)
-        r.raise_for_status()
+        try:
+            r = requests.get(url_base, timeout=30)
+            r.raise_for_status()
+        except requests.exceptions.SSLError:
+            logger.warning("SIPSA: problema de certificado TLS, reintentando con verify=False")
+            r = requests.get(url_base, verify=False, timeout=30)
+            r.raise_for_status()
         links = re.findall(r'href=[\'"]?([^\'" >]+\.xlsx?)', r.text)
         daily_links = [l for l in list(set(links)) if 'anex-SIPSADiario' in l]
         
@@ -79,12 +84,14 @@ def extract_sipsa() -> pd.DataFrame:
                     import unicodedata
                     prod_limpio = unicodedata.normalize("NFKD", producto).encode("ASCII", "ignore").decode("utf-8")
                     ciu_limpia = unicodedata.normalize("NFKD", ciudad).encode("ASCII", "ignore").decode("utf-8")
+                    central_limpia = " ".join(ciu_limpia.replace("\r", " ").replace("\n", " ").split())
+                    ciudad_base = central_limpia.split(',')[0].strip()
                     
                     records.append({
                         'fecha_registro': fecha_iso,
                         'producto': prod_limpio,
-                        'central': ciu_limpia,
-                        'ciudad': ciu_limpia.split(',')[0].strip(),
+                        'central': central_limpia,
+                        'ciudad': ciudad_base,
                         'precio_promedio_cop_kg': precio
                     })
                     

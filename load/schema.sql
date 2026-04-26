@@ -125,6 +125,8 @@ CREATE TABLE IF NOT EXISTS fact_alerta_enso (
     anomalia_precipitacion_pct DOUBLE PRECISION,
     probabilidad_deficit_hidrico DOUBLE PRECISION,
     probabilidad_exceso_hidrico  DOUBLE PRECISION,
+    fuente_origen    VARCHAR(100),
+    es_sintetico     BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE (id_tiempo, id_region)
 );
 
@@ -136,7 +138,8 @@ CREATE TABLE IF NOT EXISTS fact_precios_insumos (
     precio_cop_unidad DOUBLE PRECISION,
     unidad_medida    VARCHAR(20),
     id_region        INT REFERENCES dim_region_natural(id_region),
-    UNIQUE (id_tiempo, tipo_insumo, nombre_insumo)
+    fuente_origen    VARCHAR(100),
+    es_sintetico     BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 -- ── CAPA 3: MODELO IA ─────────────────────────
@@ -171,6 +174,60 @@ CREATE TABLE IF NOT EXISTS pred_alerta_climatica (
     activa           BOOLEAN DEFAULT TRUE,
     id_version       INT REFERENCES model_version(id_version)
 );
+
+ALTER TABLE fact_alerta_enso
+    ADD COLUMN IF NOT EXISTS fuente_origen VARCHAR(100);
+
+ALTER TABLE fact_alerta_enso
+    ADD COLUMN IF NOT EXISTS es_sintetico BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE fact_precios_insumos
+    ADD COLUMN IF NOT EXISTS fuente_origen VARCHAR(100);
+
+ALTER TABLE fact_precios_insumos
+    ADD COLUMN IF NOT EXISTS es_sintetico BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE fact_precios_insumos
+    DROP CONSTRAINT IF EXISTS fact_precios_insumos_id_tiempo_tipo_insumo_nombre_insumo_key;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fact_precios_insumos_unique_region'
+    ) THEN
+        ALTER TABLE fact_precios_insumos
+            ADD CONSTRAINT fact_precios_insumos_unique_region
+            UNIQUE (id_tiempo, tipo_insumo, nombre_insumo, id_region);
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'pred_rendimiento_unique_natural_key'
+    ) THEN
+        ALTER TABLE pred_rendimiento
+            ADD CONSTRAINT pred_rendimiento_unique_natural_key
+            UNIQUE (id_municipio, id_cultivo, id_tiempo);
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'pred_alerta_climatica_unique_natural_key'
+    ) THEN
+        ALTER TABLE pred_alerta_climatica
+            ADD CONSTRAINT pred_alerta_climatica_unique_natural_key
+            UNIQUE (id_municipio, id_tiempo);
+    END IF;
+END $$;
 
 -- ── CAPA 4: VISTAS POWER BI ────────────────────
 
@@ -308,7 +365,6 @@ SELECT
 FROM pred_alerta_climatica pa
 JOIN dim_municipio m ON m.id_municipio = pa.id_municipio
 JOIN dim_tiempo t ON t.id_tiempo = pa.id_tiempo
-JOIN model_version mv ON mv.id_version = pa.id_version
+LEFT JOIN model_version mv ON mv.id_version = pa.id_version
 LEFT JOIN dim_region_natural rn ON rn.id_region = m.id_region
 WHERE pa.activa = TRUE;
-
