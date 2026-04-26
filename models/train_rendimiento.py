@@ -96,7 +96,7 @@ def train_and_report(engine=None) -> dict:
         "fase_enso_num",
         "aptitud_suelo_num",
     ]
-    X = df[feature_cols].fillna(0)
+    X = df[feature_cols].fillna(0).astype(float)
     y = df["rendimiento_t_ha"].astype(float)
 
     try:
@@ -171,7 +171,7 @@ def save_model_to_db(engine, model, model_name, metrics, df_full, feature_cols):
         id_version = res.fetchone()[0]
 
         # 3. Guardar predicciones históricas (para auditoría/visualización)
-        X_full = df_full[feature_cols].fillna(0)
+        X_full = df_full[feature_cols].fillna(0).astype(float)
         df_full["rendimiento_predicho_t_ha"] = model.predict(X_full)
         df_full["id_version"] = id_version
 
@@ -188,10 +188,9 @@ def save_model_to_db(engine, model, model_name, metrics, df_full, feature_cols):
         
         df_to_load[load_cols].to_sql(
             "pred_rendimiento", 
-            engine, 
-            if_exists="append", 
-            index=False, 
-            chunksize=100
+            conn, 
+            if_exists="append", index=False,
+            method="multi", chunksize=1000
         )
 
     logger.info("Predicciones y versión del modelo guardadas exitosamente.")
