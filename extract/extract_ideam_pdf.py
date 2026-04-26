@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 LISTING_URL = "https://www.ideam.gov.co/sala-de-prensa/boletines/Bolet%C3%ADn-agroclim%C3%A1tico-nacional"
 
-def discover_bulletin_urls(max_pages: int = 5) -> list[str]:
+def discover_bulletin_urls(max_pages: int = 15) -> list[str]:
     """Descubre automáticamente las URLs de los boletines desde el sitio de IDEAM."""
     urls = []
     headers = {
@@ -51,6 +51,10 @@ def discover_bulletin_urls(max_pages: int = 5) -> list[str]:
 
 REGIONES = ["Andina", "Caribe", "Pacífico", "Orinoquía", "Amazonía"]
 
+# Límites de rendimiento
+MAX_PAGES_TO_SCAN = 15   # La info ENSO está en las primeras ~11 páginas
+MAX_PDF_SIZE_MB = 20     # Boletines válidos pesan 1-7 MB; >20 MB son versiones pesadas sin más info útil
+
 def _parse_fase_enso(texto: str) -> str:
     texto = texto.lower()
     if "niño" in texto:  return "El Niño"
@@ -67,10 +71,18 @@ def _extract_spi(texto: str) -> float | None:
 
 def extract_boletin_pdf(pdf_path: Path, trimestre: str, anio: int) -> pd.DataFrame:
     """Extrae tabla de alertas ENSO de un PDF de boletín agroclimático IDEAM."""
+    # Saltar archivos demasiado pesados
+    size_mb = pdf_path.stat().st_size / 1_000_000
+    if size_mb > MAX_PDF_SIZE_MB:
+        logger.info(f"  {pdf_path.name}: {size_mb:.0f} MB > {MAX_PDF_SIZE_MB} MB, omitiendo...")
+        return pd.DataFrame()
+
     registros = []
+    regiones_encontradas = set()
     try:
         with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
+            pages_to_scan = pdf.pages[:MAX_PAGES_TO_SCAN]
+            for page in pages_to_scan:
                 # 1. Intentar con tablas estructuradas
                 tables = page.extract_tables()
                 found_in_page = False
@@ -90,6 +102,7 @@ def extract_boletin_pdf(pdf_path: Path, trimestre: str, anio: int) -> pd.DataFra
                                     "texto_raw": row_text[:300],
                                 })
                                 found_in_page = True
+                                regiones_encontradas.add(region)
                 
                 # 2. Fallback a texto libre si no se detectaron regiones en tablas
                 if not found_in_page:
@@ -107,19 +120,34 @@ def extract_boletin_pdf(pdf_path: Path, trimestre: str, anio: int) -> pd.DataFra
                                         "indice_spi": spi,
                                         "texto_raw": line[:300],
                                     })
+                                    regiones_encontradas.add(region)
+                # Salida temprana si ya encontramos las 5 regiones
+                if len(regiones_encontradas) >= len(REGIONES):
+                    break
     except Exception as e:
         logger.error(f"Error procesando {pdf_path.name}: {e}")
         
     return pd.DataFrame(registros).drop_duplicates(subset=["region", "anio", "trimestre"], keep="first") if registros else pd.DataFrame()
 
 
-def _infer_periodo(filename: str) -> tuple[int, str]:
-    # Intentar sacar año y mes/trimestre del nombre del archivo
-    lower_name = filename.lower()
+def _infer_periodo(filepath) -> tuple[int, str]:
+    """Infiere el año y trimestre del boletín a partir del nombre del archivo.
+    Si no hay año en el nombre, intenta con la fecha de modificación del archivo."""
+    filepath = Path(filepath) if not isinstance(filepath, Path) else filepath
+    lower_name = filepath.name.lower()
     
     # Buscar año
     anio_match = re.search(r"(20\d{2})", lower_name)
-    anio = int(anio_match.group(1)) if anio_match else 0
+    if anio_match:
+        anio = int(anio_match.group(1))
+    elif filepath.exists():
+        # Fallback: usar la fecha de modificación del archivo
+        from datetime import datetime
+        mtime = filepath.stat().st_mtime
+        anio = datetime.fromtimestamp(mtime).year
+        logger.info(f"  {filepath.name}: año inferido de fecha de archivo -> {anio}")
+    else:
+        anio = 0
     
     # Buscar trimestre o mes
     if "enero" in lower_name or "febrero" in lower_name or "marzo" in lower_name or "t1" in lower_name:
@@ -175,7 +203,7 @@ def extract_all_boletines() -> pd.DataFrame:
                 # Ya existe, cerramos la conexión
                 r.close()
             
-            anio, trimestre = _infer_periodo(filename)
+            anio, trimestre = _infer_periodo(local)
             df = extract_boletin_pdf(local, trimestre, anio)
             if not df.empty:
                 all_dfs.append(df)
@@ -185,7 +213,16 @@ def extract_all_boletines() -> pd.DataFrame:
     # También procesar archivos locales que ya existan
     for local in sorted(pdf_dir.glob("*.pdf")):
         if any(local.name in url for url in urls): continue
-        anio, trimestre = _infer_periodo(local.name)
+        # Validar que sea un PDF real antes de intentar parsearlo
+        try:
+            header = local.read_bytes()[:10]
+            if b"%PDF" not in header:
+                logger.warning(f"  {local.name} no es un PDF válido, eliminando del caché...")
+                local.unlink()
+                continue
+        except Exception:
+            continue
+        anio, trimestre = _infer_periodo(local)
         df = extract_boletin_pdf(local, trimestre, anio)
         if not df.empty:
             all_dfs.append(df)

@@ -71,14 +71,14 @@ CHECKS = [
     },
     {
         "nombre": "trimestres_enso_faltantes",
-        "sql": """
+        "sql": f"""
             WITH fact_count AS (
                 SELECT COUNT(*) AS total FROM fact_alerta_enso
             ),
             periodos AS (
                 SELECT DISTINCT anio, trimestre
                 FROM dim_tiempo
-                WHERE anio BETWEEN 2007 AND 2025
+                WHERE anio BETWEEN {CLIMA_YEAR_START} AND {YEAR_END}
             ),
             enso AS (
                 SELECT DISTINCT dt.anio, dt.trimestre
