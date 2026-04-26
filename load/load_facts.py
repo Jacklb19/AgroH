@@ -12,6 +12,14 @@ def _normalizar_region(region: str) -> str:
     region = "".join(c for c in region if unicodedata.category(c) != "Mn")
     return region
 
+
+def _normalizar_nombre(valor: str) -> str:
+    if not isinstance(valor, str):
+        return ""
+    valor = unicodedata.normalize("NFD", valor.strip().upper())
+    valor = "".join(c for c in valor if unicodedata.category(c) != "Mn")
+    return " ".join(valor.split())
+
 def load_all_facts(engine, df_produccion: pd.DataFrame, df_boletines: pd.DataFrame):
     """
     Carga los hechos históricos en la base de datos.
@@ -24,8 +32,8 @@ def load_all_facts(engine, df_produccion: pd.DataFrame, df_boletines: pd.DataFra
     dim_tiempo_db = pd.read_sql("SELECT id_tiempo, anio FROM dim_tiempo WHERE mes = 12", engine)
     
     # 2. Unir df_produccion con dim_cultivo y dim_tiempo
-    df_produccion["nombre_normalizado"] = df_produccion["cultivo"].astype(str).str.upper().str.strip()
-    df_produccion["anio"] = df_produccion["a_o"].astype(int)
+    df_produccion["nombre_normalizado"] = df_produccion["cultivo"].astype(str).apply(_normalizar_nombre)
+    df_produccion["anio"] = df_produccion["anio"].astype(int)
     
     df_merged = df_produccion.merge(dim_cultivo_db, on="nombre_normalizado", how="inner")
     df_merged = df_merged.merge(dim_tiempo_db, on="anio", how="inner")
@@ -35,11 +43,11 @@ def load_all_facts(engine, df_produccion: pd.DataFrame, df_boletines: pd.DataFra
         "id_municipio": df_merged["id_municipio"],
         "id_cultivo": df_merged["id_cultivo"],
         "id_tiempo": df_merged["id_tiempo"],
-        "area_sembrada_ha": df_merged["rea_sembrada_ha"],
-        "area_cosechada_ha": df_merged["rea_cosechada_ha"],
-        "produccion_total_ton": df_merged["producci_n_t"],
+        "area_sembrada_ha": df_merged["area_sembrada_ha"],
+        "area_cosechada_ha": df_merged["area_cosechada_ha"],
+        "produccion_total_ton": df_merged["produccion_total_ton"],
         "rendimiento_t_ha": df_merged["rendimiento_t_ha"],
-        "fuente_origen": "MinAgricultura A04/A05"
+        "fuente_origen": "MinAgricultura EVA 2019-2024"
     }
     df_fact = pd.DataFrame(fact_cols)
     
@@ -91,8 +99,9 @@ def load_fact_clima_mensual(engine, df_clima_mensual: pd.DataFrame):
     # 5. Seleccionar columnas del schema
     cols_fact = [
         "id_estacion", "id_municipio", "id_tiempo",
-        "precipitacion_mm", "temperatura_media_c", "temperatura_max_c",
-        "temperatura_min_c", "humedad_relativa_pct", "brillo_solar_horas_dia"
+        "precipitacion_mm",
+        "temperatura_media_c", "temperatura_max_c", "temperatura_min_c",
+        "humedad_relativa_pct", "brillo_solar_horas_dia",
     ]
     # Asegurar que existen todas las columnas (pueden faltar si no hubo datos de ese sensor)
     for c in cols_fact:
@@ -115,7 +124,7 @@ def load_fact_clima_mensual(engine, df_clima_mensual: pd.DataFrame):
 
 
 def load_fact_alerta_enso(engine, df_boletines: pd.DataFrame):
-    """Carga alertas ENSO trimestrales, distribuyéndolas en los tres meses del trimestre."""
+    """Carga alertas ENSO mensuales (NOAA API) asignándolas a todas las regiones."""
     from .db import upsert
 
     if df_boletines.empty:
@@ -123,62 +132,54 @@ def load_fact_alerta_enso(engine, df_boletines: pd.DataFrame):
         return
 
     df = df_boletines.copy()
-    df = df[df["anio"].notna() & df["trimestre"].notna() & df["region"].notna()]
-    if df.empty:
-        logger.warning("Los boletines ENSO no contienen anio/trimestre/region válidos")
+    if "anio" not in df.columns or "mes" not in df.columns:
+        logger.warning("Los boletines ENSO no contienen anio/mes válidos")
         return
 
     df["anio"] = pd.to_numeric(df["anio"], errors="coerce").astype("Int64")
-    df["trimestre_num"] = (
-        df["trimestre"].astype(str).str.extract(r"(\d+)")[0].astype("Int64")
-    )
-    df = df.dropna(subset=["anio", "trimestre_num"])
-    if df.empty:
-        logger.warning("No se pudo inferir el trimestre de los boletines ENSO")
-        return
+    df["mes"] = pd.to_numeric(df["mes"], errors="coerce").astype("Int64")
+    df = df.dropna(subset=["anio", "mes"])
 
     dim_region_db = pd.read_sql(
-        "SELECT id_region, nombre_region FROM dim_region_natural",
+        "SELECT id_region FROM dim_region_natural",
         engine,
     )
-    dim_region_db["region_norm"] = dim_region_db["nombre_region"].apply(_normalizar_region)
-    df["region_norm"] = df["region"].apply(_normalizar_region)
-    df = df.merge(dim_region_db[["id_region", "region_norm"]], on="region_norm", how="left")
-    df = df.dropna(subset=["id_region"])
+    if dim_region_db.empty:
+        logger.warning("No hay regiones en dim_region_natural para cargar ENSO")
+        return
 
-    expanded_rows = []
-    for row in df.to_dict(orient="records"):
-        trimestre_num = int(row["trimestre_num"])
-        meses = range((trimestre_num - 1) * 3 + 1, (trimestre_num - 1) * 3 + 4)
-        for mes in meses:
-            expanded_rows.append({
-                "anio": int(row["anio"]),
-                "mes": mes,
-                "id_region": int(row["id_region"]),
-                "fase_enso": row.get("fase_enso"),
-                "indice_spi": row.get("indice_spi"),
-                "anomalia_precipitacion_pct": row.get("anomalia_precipitacion_pct"),
-                "probabilidad_deficit_hidrico": row.get("probabilidad_deficit_hidrico"),
-                "probabilidad_exceso_hidrico": row.get("probabilidad_exceso_hidrico"),
-            })
-
-    df_expanded = pd.DataFrame(expanded_rows)
     dim_tiempo_db = pd.read_sql("SELECT id_tiempo, anio, mes FROM dim_tiempo", engine)
-    df_expanded = df_expanded.merge(dim_tiempo_db, on=["anio", "mes"], how="inner")
-    if df_expanded.empty:
+    df = df.merge(dim_tiempo_db, on=["anio", "mes"], how="inner")
+    if df.empty:
         logger.warning("No hay periodos válidos en dim_tiempo para cargar ENSO")
         return
+
+    # Expandir para todas las regiones (producto cartesiano)
+    df["key"] = 1
+    dim_region_db["key"] = 1
+    df_expanded = df.merge(dim_region_db, on="key").drop("key", axis=1)
 
     cols = [
         "id_tiempo",
         "id_region",
         "fase_enso",
         "indice_spi",
-        "anomalia_precipitacion_pct",
-        "probabilidad_deficit_hidrico",
-        "probabilidad_exceso_hidrico",
+        "fuente_origen",
+        "es_sintetico",
     ]
+    for col in cols:
+        if col not in df_expanded.columns:
+            df_expanded[col] = None
+
     df_fact = df_expanded[cols].drop_duplicates(subset=["id_tiempo", "id_region"])
+    
+    # Rellenar anomalías con 0 si no existen en NOAA
+    df_fact["anomalia_precipitacion_pct"] = None
+    df_fact["probabilidad_deficit_hidrico"] = None
+    df_fact["probabilidad_exceso_hidrico"] = None
+    df_fact["fuente_origen"] = df_fact["fuente_origen"].fillna("NOAA ONI")
+    df_fact["es_sintetico"] = df_fact["es_sintetico"].fillna(False)
+    
     upsert(engine, "fact_alerta_enso", df_fact, ["id_tiempo", "id_region"])
     logger.info("fact_alerta_enso: %s registros cargados", len(df_fact))
 
@@ -192,7 +193,6 @@ def load_fact_precios_mayoristas(engine, df_precios: pd.DataFrame):
         return
 
     dim_tiempo_db = pd.read_sql("SELECT id_tiempo, anio, mes FROM dim_tiempo", engine)
-    dim_cultivo_db = pd.read_sql("SELECT id_cultivo, nombre_normalizado FROM dim_cultivo", engine)
     dim_central_db = pd.read_sql(
         "SELECT id_central, nombre_central, ciudad FROM dim_central_abastos",
         engine,
@@ -201,9 +201,21 @@ def load_fact_precios_mayoristas(engine, df_precios: pd.DataFrame):
     df = df_precios.copy()
     df["anio"] = pd.to_numeric(df["anio"], errors="coerce").astype("Int64")
     df["mes"] = pd.to_numeric(df["mes"], errors="coerce").astype("Int64")
-    df["nombre_normalizado"] = df["producto"].astype(str).str.upper().str.strip()
+    df["nombre_normalizado"] = df["producto"].astype(str).apply(_normalizar_nombre)
     df["nombre_central"] = df["nombre_central"].astype(str).str.strip()
     df["ciudad"] = df["ciudad"].astype(str).str.strip()
+
+    cultivos_sipsa = (
+        df[["producto", "nombre_normalizado"]]
+        .dropna(subset=["producto", "nombre_normalizado"])
+        .drop_duplicates()
+        .rename(columns={"producto": "nombre_cultivo"})
+    )
+    cultivos_sipsa["tipo_ciclo"] = None
+    cultivos_sipsa["familia_botanica"] = None
+    upsert(engine, "dim_cultivo", cultivos_sipsa, ["nombre_normalizado"])
+
+    dim_cultivo_db = pd.read_sql("SELECT id_cultivo, nombre_normalizado FROM dim_cultivo", engine)
 
     df = df.merge(dim_tiempo_db, on=["anio", "mes"], how="inner")
     df = df.merge(dim_cultivo_db, on="nombre_normalizado", how="inner")
@@ -245,20 +257,34 @@ def load_fact_aptitud_suelo(engine, df_suelo: pd.DataFrame):
         "id_municipio",
         "id_cultivo",
         "clase_aptitud",
-        "tipo_suelo",
-        "textura_suelo",
-        "pendiente_dominante",
-        "drenaje",
-        "limitante_principal",
     ]
     for col in cols:
         if col not in df.columns:
             df[col] = None
 
+    # Mapear valores de aptitud al constraint de la BD
+    def map_aptitud(val):
+        if not isinstance(val, str): return None
+        v = val.lower()
+        if "alta" in v: return "alta"
+        if "media" in v or "moderada" in v: return "moderada"
+        if "baja" in v or "marginal" in v: return "marginal"
+        if "no apta" in v or "exclusion legal" in v or "exclusión" in v: return "no_apta"
+        return "no_apta"
+
+    df["clase_aptitud"] = df["clase_aptitud"].apply(map_aptitud)
+
     df_fact = df[cols].dropna(subset=["id_municipio"]).drop_duplicates(
         subset=["id_municipio", "id_cultivo"],
         keep="first",
     )
+    # Filtrar solo municipios que existen en dim_municipio para evitar FK violation
+    municipios_validos = pd.read_sql("SELECT id_municipio FROM dim_municipio", engine)["id_municipio"].tolist()
+    antes = len(df_fact)
+    df_fact = df_fact[df_fact["id_municipio"].isin(municipios_validos)]
+    descartados = antes - len(df_fact)
+    if descartados > 0:
+        logger.warning(f"fact_aptitud_suelo: {descartados} registros descartados por id_municipio no encontrado en dim_municipio")
     upsert(engine, "fact_aptitud_suelo", df_fact, ["id_municipio", "id_cultivo"])
     logger.info("fact_aptitud_suelo: %s registros cargados", len(df_fact))
 
@@ -275,11 +301,6 @@ def load_fact_censo_agropecuario(engine, df_censo: pd.DataFrame):
     cols = [
         "id_municipio",
         "anio_censo",
-        "upa_promedio_ha",
-        "pct_tenencia_propia",
-        "pct_tenencia_arrendada",
-        "pct_acceso_riego",
-        "pct_asistencia_tecnica",
         "area_cultivos_permanentes_ha",
         "area_cultivos_transitorios_ha",
     ]
@@ -288,5 +309,48 @@ def load_fact_censo_agropecuario(engine, df_censo: pd.DataFrame):
             df[col] = None
 
     df_fact = df[cols].dropna(subset=["id_municipio"])
+    # Filtrar solo municipios que existen en dim_municipio para evitar FK violation
+    municipios_validos = pd.read_sql("SELECT id_municipio FROM dim_municipio", engine)["id_municipio"].tolist()
+    antes = len(df_fact)
+    df_fact = df_fact[df_fact["id_municipio"].isin(municipios_validos)]
+    descartados = antes - len(df_fact)
+    if descartados > 0:
+        logger.warning(f"fact_censo_agropecuario: {descartados} registros descartados por id_municipio fuera de dim_municipio")
     upsert(engine, "fact_censo_agropecuario", df_fact, ["id_municipio", "anio_censo"])
     logger.info("fact_censo_agropecuario: %s registros cargados", len(df_fact))
+
+def load_fact_precios_insumos(engine, df_insumos: pd.DataFrame):
+    """Carga precios de insumos agrícolas mensuales."""
+    from .db import upsert
+
+    if df_insumos.empty:
+        logger.info("Sin precios de insumos para cargar")
+        return
+
+    df = df_insumos.copy()
+    
+    # normalizar_insumos ya agrega id_tiempo, así que no es necesario cruzar con dim_tiempo_db
+    if "id_tiempo" not in df.columns:
+        logger.warning("No se encontro id_tiempo en precios de insumos")
+        return
+
+    cols = [
+        "id_tiempo",
+        "tipo_insumo",
+        "nombre_insumo",
+        "precio_cop_unidad",
+        "unidad_medida",
+        "id_region",
+        "fuente_origen",
+        "es_sintetico",
+    ]
+    for col in cols:
+        if col not in df.columns:
+            df[col] = None
+
+    df_fact = df[cols].copy()
+    # Eliminar duplicados en las llaves naturales del schema
+    df_fact = df_fact.drop_duplicates(subset=["id_tiempo", "tipo_insumo", "nombre_insumo", "id_region"])
+    
+    upsert(engine, "fact_precios_insumos", df_fact, ["id_tiempo", "tipo_insumo", "nombre_insumo", "id_region"])
+    logger.info("fact_precios_insumos: %s registros cargados", len(df_fact))

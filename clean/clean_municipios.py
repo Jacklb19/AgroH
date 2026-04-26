@@ -92,7 +92,7 @@ def resolver_municipio(nombre: str, divipola_map: dict, synonym_map: dict) -> st
         return divipola_map[norm]
     if norm in synonym_map:
         return synonym_map[norm]
-    logger.debug(f"Municipio no resuelto: '{nombre}' → '{norm}'")
+    logger.debug(f"Municipio no resuelto: '{nombre}' -> '{norm}'")
     return None
 
 def agregar_id_municipio(df: pd.DataFrame, col_nombre: str) -> pd.DataFrame:
@@ -158,10 +158,13 @@ def asignar_estaciones_a_municipios(
     municipios["id_municipio"] = municipios["cod_mpio"].astype(str).str.zfill(5)
     municipios["latitud_centroide"] = _to_float(municipios["latitud"])
     municipios["longitud_centroide"] = _to_float(municipios["longitud"])
+    # Añadimos altitud de divipola si existe, o 0 si no
+    municipios["altitud_muni"] = _to_float(municipios.get("altitud", pd.Series(0, index=municipios.index)))
     municipios = municipios.dropna(subset=["latitud_centroide", "longitud_centroide"])
 
     muni_lat = municipios["latitud_centroide"].to_numpy()
     muni_lon = municipios["longitud_centroide"].to_numpy()
+    muni_alt = municipios["altitud_muni"].to_numpy()
     muni_ids = municipios["id_municipio"].to_numpy()
 
     assigned_ids: list[str | None] = []
@@ -176,16 +179,26 @@ def asignar_estaciones_a_municipios(
         lon = getattr(row, "longitud", None)
         fallback_name = getattr(row, fallback_col, None) if hasattr(row, fallback_col) else None
 
+        alt_estacion = _to_float(pd.Series([getattr(row, "altitud", 0)])).iloc[0]
+
         if pd.notna(lat) and pd.notna(lon) and len(muni_ids) > 0:
-            dist = _haversine_km(float(lat), float(lon), muni_lat, muni_lon)
+            dist_2d = _haversine_km(float(lat), float(lon), muni_lat, muni_lon)
+            
+            # Penalización altitudinal: sumar 10km por cada 100m de diferencia (ajuste empírico)
+            diferencia_alt = np.abs(muni_alt - alt_estacion)
+            penalizacion = (diferencia_alt / 100.0) * 10.0
+            
+            # Distancia penalizada
+            dist = dist_2d + penalizacion
+            
             idx = int(np.argmin(dist))
-            nearest_distance = float(dist[idx])
+            nearest_distance = float(dist_2d[idx]) # Guardamos la distancia 2D real, no la penalizada
             assigned_ids.append(str(muni_ids[idx]))
             distances.append(nearest_distance)
-            if nearest_distance <= max_radius_km:
-                methods.append("spatial_within_radius")
+            if nearest_distance <= max_radius_km and diferencia_alt[idx] <= 400:
+                methods.append("spatial_within_radius_and_altitude")
             else:
-                methods.append("spatial_nearest_outside_radius")
+                methods.append("spatial_nearest_outside_radius_or_altitude")
             continue
 
         fallback_id = resolver_municipio(fallback_name, divipola_map, synonym_map)
@@ -197,10 +210,10 @@ def asignar_estaciones_a_municipios(
     df["distancia_municipio_km"] = distances
     df["metodo_asignacion_municipio"] = methods
 
-    fuera_radio = (df["metodo_asignacion_municipio"] == "spatial_nearest_outside_radius").sum()
+    fuera_radio = (df["metodo_asignacion_municipio"] == "spatial_nearest_outside_radius_or_altitude").sum()
     sin_resolver = df["id_municipio"].isna().sum()
     logger.info(
-        "Asignación espacial estaciones→municipio: %s estaciones, %s fuera del radio, %s sin resolver",
+        "Asignación espacial estaciones->municipio: %s estaciones, %s fuera del radio, %s sin resolver",
         len(df),
         int(fuera_radio),
         int(sin_resolver),
