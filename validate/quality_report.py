@@ -32,9 +32,17 @@ CHECKS = [
     },
     {
         "nombre": "modelos_activos_duplicados",
-        "sql": "SELECT COUNT(*) AS pct FROM model_version WHERE activo = TRUE",
-        "umbral_max": 1,
-        "mensaje": "Número de modelos activos en producción (debe ser ≤ 1)",
+        "sql": """
+            SELECT COALESCE(SUM(GREATEST(cnt - 1, 0)), 0)::FLOAT AS pct
+            FROM (
+                SELECT nombre_modelo, COUNT(*) AS cnt
+                FROM model_version
+                WHERE activo = TRUE
+                GROUP BY nombre_modelo
+            ) t
+        """,
+        "umbral_max": 0,
+        "mensaje": "Número de modelos activos en producción (debe ser <= 1)",
     },
     {
         "nombre": "estaciones_sin_municipio",
@@ -71,14 +79,14 @@ CHECKS = [
     },
     {
         "nombre": "trimestres_enso_faltantes",
-        "sql": """
+        "sql": f"""
             WITH fact_count AS (
                 SELECT COUNT(*) AS total FROM fact_alerta_enso
             ),
             periodos AS (
                 SELECT DISTINCT anio, trimestre
                 FROM dim_tiempo
-                WHERE anio BETWEEN 2007 AND 2025
+                WHERE anio BETWEEN {CLIMA_YEAR_START} AND {YEAR_END}
             ),
             enso AS (
                 SELECT DISTINCT dt.anio, dt.trimestre
@@ -124,9 +132,11 @@ def run_quality_report(engine) -> pd.DataFrame:
                     "estado": estado,
                 })
                 if estado == "ALERTA":
-                    logger.warning(f"CALIDAD ALERTA — {check['mensaje']}: {valor:.2f}")
+                    val_str = f"{valor:.2f}" if valor is not None else "N/A"
+                    logger.warning(f"CALIDAD ALERTA — {check['mensaje']}: {val_str}")
                 else:
-                    logger.info(f"CALIDAD OK — {check['mensaje']}: {valor:.2f}")
+                    val_str = f"{valor:.2f}" if valor is not None else "N/A"
+                    logger.info(f"CALIDAD OK — {check['mensaje']}: {val_str}")
             except Exception as e:
                 logger.error(f"Error en check {check['nombre']}: {e}")
     return pd.DataFrame(resultados)

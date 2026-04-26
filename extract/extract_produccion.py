@@ -29,5 +29,5 @@ def extract_produccion() -> pd.DataFrame:
     df = pd.DataFrame(rows)
     out = DATA_RAW / "produccion_agricola_raw.csv"
     df.to_csv(out, index=False)
-    logger.info(f"A04/A05: {len(df)} registros → {out}")
+    logger.info(f"A04/A05: {len(df)} registros -> {out}")
     return df
