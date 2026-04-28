@@ -160,3 +160,5 @@ data/raw/
 data/processed/
 *.log
 pipeline_output.txt
+models/saved/
+scratch/
