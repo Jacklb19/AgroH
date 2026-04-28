@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT = 60  # Con la nueva lógica, debería responder en menos de 10s
 MAX_RETRIES = 3
+MAX_CONSECUTIVE_FAILURES = 3  # Si 3 meses seguidos fallan, el servidor está caído
 
 def _download_month_fast(url: str, agg_func: str, anio: int, mes: int, include_sensor: bool = False) -> pd.DataFrame:
     """Baja datos agregados de un mes de forma ultra-rápida."""
@@ -89,24 +90,39 @@ def extract_precipitacion_mensual() -> pd.DataFrame:
 
     logger.info("Descargando precipitación IDEAM (Optimización V4)...")
     all_dfs = []
+    consecutive_failures = 0
     for anio in range(CLIMA_YEAR_START, YEAR_END + 1):
         for mes in range(1, 13):
             if anio == datetime.now().year and mes > datetime.now().month: break
-            
+
             cache = out_dir / f"precip_v4_{anio}_{mes:02d}.parquet"
             if cache.exists():
                 df_m = pd.read_parquet(cache)
+                consecutive_failures = 0
             else:
                 df_m = _download_month_fast(url, "sum", anio, mes, include_sensor=False)
                 if not df_m.empty:
                     df_m.to_parquet(cache, index=False)
                     logger.info(f"  {anio}-{mes:02d}: {len(df_m)} estaciones con datos")
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                        logger.warning(
+                            f"Precipitación IDEAM: {consecutive_failures} meses consecutivos sin respuesta. "
+                            "El servidor parece caído — se omite el resto de la descarga."
+                        )
+                        break
             if not df_m.empty: all_dfs.append(df_m)
+        else:
+            continue
+        break  # sale del bucle exterior si el interior hizo break
 
     if all_dfs:
         df_all = pd.concat(all_dfs, ignore_index=True)
         df_all.to_parquet(out_file, index=False)
         return df_all
+    logger.warning("Precipitación IDEAM: no se obtuvieron datos. El pipeline continuará sin datos de lluvia.")
     return pd.DataFrame()
 
 def extract_clima_combinado_mensual() -> pd.DataFrame:
@@ -118,24 +134,39 @@ def extract_clima_combinado_mensual() -> pd.DataFrame:
 
     logger.info("Descargando variables climáticas (Optimización V4)...")
     all_dfs = []
+    consecutive_failures = 0
     for anio in range(CLIMA_YEAR_START, YEAR_END + 1):
         for mes in range(1, 13):
             if anio == datetime.now().year and mes > datetime.now().month: break
-            
+
             cache = out_dir / f"clima_v4_{anio}_{mes:02d}.parquet"
             if cache.exists():
                 df_m = pd.read_parquet(cache)
+                consecutive_failures = 0
             else:
                 df_m = _download_month_fast(url, "avg", anio, mes, include_sensor=True)
                 if not df_m.empty:
                     df_m.to_parquet(cache, index=False)
                     logger.info(f"  {anio}-{mes:02d}: {len(df_m)} variables/estaciones")
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                        logger.warning(
+                            f"Clima combinado IDEAM: {consecutive_failures} meses consecutivos sin respuesta. "
+                            "El servidor parece caído — se omite el resto de la descarga."
+                        )
+                        break
             if not df_m.empty: all_dfs.append(df_m)
+        else:
+            continue
+        break
 
     if all_dfs:
         df_all = pd.concat(all_dfs, ignore_index=True)
         df_all.to_parquet(out_file, index=False)
         return df_all
+    logger.warning("Clima combinado IDEAM: no se obtuvieron datos. El pipeline continuará sin datos de temperatura/humedad.")
     return pd.DataFrame()
 
 def extract_all_clima() -> tuple[pd.DataFrame, pd.DataFrame]:
