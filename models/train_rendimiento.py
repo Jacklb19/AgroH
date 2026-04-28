@@ -88,15 +88,20 @@ def train_and_report(engine=None) -> dict:
         raise ValueError("No hay datos suficientes para entrenar el modelo")
 
     df = df.dropna(subset=["rendimiento_t_ha"])
-    
-    # NUEVAS VARIABLES LIMPIAS (SIN FUGA DE DATOS)
+
     feature_cols = [
+        "id_cultivo",        # feature más importante: el tipo de cultivo determina el rendimiento
+        "id_municipio_enc",  # captura patrones territoriales
         "anio",
         "area_sembrada_ha",
-        "temp_promedio_anual",     # Del Feature Store
-        "temp_maxima_anual",       # Del Feature Store
-        "lluvia_acumulada_anual"   # Del Feature Store
+        "temp_promedio_anual",
+        "temp_maxima_anual",
+        "lluvia_acumulada_anual",
     ]
+
+    # Codificar id_municipio como entero (XGBoost no acepta strings)
+    df["id_municipio_enc"] = df["id_municipio"].astype(str).astype("category").cat.codes
+
     X = df[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
     y = df["rendimiento_t_ha"].astype(float)
 
