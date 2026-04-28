@@ -1,19 +1,40 @@
 import pandas as pd
 import requests
 import logging
+import io
 from pathlib import Path
 from config.settings import DATA_RAW, YEAR_END
 
 logger = logging.getLogger(__name__)
 
-URL_NOAA = "https://origin.cpc.ncep.noaa.gov/products/analysis_monitoring/ensostuff/detrend.nino34.ascii.txt"
+# URL principal (www funciona; origin está caído)
+URL_NOAA_PRIMARY = "https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/ensostuff/detrend.nino34.ascii.txt"
+# Fallback: PSL NOAA (Niño 3.4 anomalías)
+URL_NOAA_FALLBACK = "https://psl.noaa.gov/data/correlation/nina34.anom.data"
 
 def extract_noaa_enso() -> pd.DataFrame:
     """Extrae el índice ONI directamente de la NOAA, reemplazando PDFs."""
     logger.info("Extrayendo datos de ENSO desde NOAA (ONI Index)...")
     try:
+        # Intentar URLs con timeout y fallback
+        text = None
+        for url in [URL_NOAA_PRIMARY, URL_NOAA_FALLBACK]:
+            try:
+                logger.info(f"Intentando: {url}")
+                resp = requests.get(url, timeout=30)
+                resp.raise_for_status()
+                text = resp.text
+                logger.info(f"Conexión exitosa: {url}")
+                break
+            except requests.RequestException as req_err:
+                logger.warning(f"Fallo en {url}: {req_err}")
+                continue
+
+        if text is None:
+            raise ConnectionError("No se pudo conectar a ninguna URL de NOAA")
+
         # El archivo de NOAA es texto ascii con cabecera YR MON TOTAL CLIM ANOM
-        df = pd.read_csv(URL_NOAA, sep=r'\s+')
+        df = pd.read_csv(io.StringIO(text), sep=r'\s+', engine='python')
         
         # Filtrar años relevantes (2015+ hasta el año operativo actual del pipeline)
         df = df[(df["YR"] >= 2015) & (df["YR"] <= YEAR_END)]
