@@ -37,6 +37,11 @@ def unificar_clima_mensual(df_precip: pd.DataFrame,
         df_p["anio"] = pd.to_numeric(df_p["anio"], errors="coerce").astype("Int64")
         df_p["mes"] = pd.to_numeric(df_p["mes"], errors="coerce").astype("Int64")
         df_p["precipitacion_mm"] = pd.to_numeric(df_p["precipitacion_mm"], errors="coerce")
+        
+        # Filtro de calidad: Precipitación en rango [0, 3000] mm/mes
+        df_p.loc[df_p["precipitacion_mm"] < 0, "precipitacion_mm"] = 0
+        df_p.loc[df_p["precipitacion_mm"] > 3000, "precipitacion_mm"] = np.nan
+        
         df_p = df_p[["id_estacion", "anio", "mes", "precipitacion_mm"]].dropna(
             subset=["id_estacion", "anio", "mes"]
         )
@@ -92,6 +97,15 @@ def unificar_clima_mensual(df_precip: pd.DataFrame,
             
             # Limpiar nulos en llaves
             df_c_pivot = df_c_pivot.dropna(subset=["id_estacion", "anio", "mes"])
+            
+            # Filtros de calidad: Temperatura en [-10, 50], Humedad en [0, 100]
+            for t_col in ["temperatura_media_c", "temperatura_max_c", "temperatura_min_c"]:
+                if t_col in df_c_pivot.columns:
+                    df_c_pivot.loc[(df_c_pivot[t_col] < -10) | (df_c_pivot[t_col] > 50), t_col] = np.nan
+            
+            if "humedad_relativa_pct" in df_c_pivot.columns:
+                df_c_pivot.loc[(df_c_pivot["humedad_relativa_pct"] < 0) | (df_c_pivot["humedad_relativa_pct"] > 100), "humedad_relativa_pct"] = np.nan
+                
             result_dfs.append(df_c_pivot)
             logger.info(f"Clima combinado mensual: {len(df_c_pivot)} registros unificados")
 

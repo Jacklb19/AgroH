@@ -4,7 +4,7 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 
-from config.settings import MANUAL_DATA_DIR
+from config.settings import MANUAL_DATA_DIR, DATA_RAW
 
 logger = logging.getLogger(__name__)
 
@@ -148,25 +148,32 @@ def _resumir_por_overlay(gdf_sipra: gpd.GeoDataFrame) -> pd.DataFrame:
 
 
 def load_censo_agropecuario_local() -> pd.DataFrame:
-    base = MANUAL_DATA_DIR / "cna"
-    candidates = (
-        list(base.glob("*.csv"))
-        + list(base.glob("*.xlsx"))
-        + list(base.glob("*.xls"))
-        + list(base.glob("*.parquet"))
-    )
-    if not candidates:
-        return pd.DataFrame()
-
-    path = candidates[0]
-    logger.info("Leyendo archivo CNA manual: %s", path.name)
-    suffix = path.suffix.lower()
-    if suffix == ".csv":
-        df = pd.read_csv(path)
-    elif suffix == ".parquet":
-        df = pd.read_parquet(path)
+    # 1. Buscar archivo extraído automáticamente por el pipeline (extract_cna.py)
+    auto_path = DATA_RAW / "cna_raw_automatizado.csv"
+    if auto_path.exists():
+        logger.info("Leyendo archivo CNA automatizado: %s", auto_path.name)
+        df = pd.read_csv(auto_path)
     else:
-        df = pd.read_excel(path)
+        # 2. Fallback a directorio manual si no existe el automático
+        base = MANUAL_DATA_DIR / "cna"
+        candidates = (
+            list(base.glob("*.csv"))
+            + list(base.glob("*.xlsx"))
+            + list(base.glob("*.xls"))
+            + list(base.glob("*.parquet"))
+        )
+        if not candidates:
+            return pd.DataFrame()
+
+        path = candidates[0]
+        logger.info("Leyendo archivo CNA manual: %s", path.name)
+        suffix = path.suffix.lower()
+        if suffix == ".csv":
+            df = pd.read_csv(path)
+        elif suffix == ".parquet":
+            df = pd.read_parquet(path)
+        else:
+            df = pd.read_excel(path)
 
     rename_map = {}
     lower_map = {col.lower(): col for col in df.columns}
