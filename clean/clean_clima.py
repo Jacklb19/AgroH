@@ -18,28 +18,38 @@ from config.settings import DATA_PROCESSED
 logger = logging.getLogger(__name__)
 
 
+import unicodedata
+
+def _norm(s):
+    if not isinstance(s, str):
+        return ""
+    s = s.lower().strip()
+    s = unicodedata.normalize("NFD", s)
+    return "".join(c for c in s if unicodedata.category(c) != "Mn")
+
 def _normalizar_tipo_sensor(descripcion: str) -> str:
     """
     Normaliza la descripción del sensor IDEAM a un nombre estándar.
-    Usa casefold() y contains() para robustez ante variaciones de texto.
-
-    Corrección 2.1.b: Reemplaza el mapeo por strings exactos.
     """
-    if not isinstance(descripcion, str):
+    s = _norm(descripcion)
+    if not s:
         return "sensor_desconocido"
-    d = descripcion.casefold()
-    if "temperatura" in d or "temp" in d:
+    
+    if "humedad" in s and "suelo" in s:
+        return "sensor_desconocido"
+    if "temp" in s and ("max" in s or "maxima" in s):
+        return "temperatura_max_c"
+    if "temp" in s and ("min" in s or "minima" in s):
+        return "temperatura_min_c"
+    if "temp" in s:
         return "temperatura_media_c"
-    if "humedad" in d:
+    if "humedad del aire" in s or "hum relativa" in s or "relativa" in s:
         return "humedad_relativa_pct"
-    if "brillo" in d or "solar" in d or "radiaci" in d:
+    if "brill" in s or "solar" in s or "radia" in s:
         return "brillo_solar_horas_dia"
-    if "precipit" in d:
+    if "precipit" in s:
         return "precipitacion_mm"
-    logger.warning(
-        "CLIMA: Tipo de sensor desconocido: '%s' — clasificado como 'sensor_desconocido'",
-        descripcion
-    )
+        
     return "sensor_desconocido"
 
 
@@ -131,37 +141,50 @@ def unificar_clima_mensual(df_precip: pd.DataFrame,
             df_c["variable"] = "sensor_desconocido"
             logger.warning("CLIMA: columna 'descripcionsensor' no encontrada")
 
-        # Loguear sensores desconocidos pero NO descartarlos silenciosamente
-        desconocidos = df_c[df_c["variable"] == "sensor_desconocido"]
-        if not desconocidos.empty:
-            if "descripcionsensor" in df_c.columns:
-                sensores_unknown = desconocidos["descripcionsensor"].value_counts().head(10).to_dict()
-                logger.warning(
-                    "CLIMA: %s registros con sensor_desconocido. Top sensores: %s",
-                    len(desconocidos), sensores_unknown
-                )
-            # Filtrar los desconocidos (no se pueden pivotar de forma útil)
-            df_c = df_c[df_c["variable"] != "sensor_desconocido"]
+        # LOG CRÍTICO: ver qué quedó sin clasificar
+        no_clasificados = df_c[df_c["variable"] == "sensor_desconocido"]
+        if not no_clasificados.empty and "descripcionsensor" in df_c.columns:
+            logger.warning("CLIMA: sensores sin clasificar (revisar patrones): %s", 
+                           no_clasificados["descripcionsensor"].value_counts().to_dict())
+
+        # Filtrar los desconocidos (no se pueden pivotar de forma útil)
+        df_c = df_c[df_c["variable"] != "sensor_desconocido"]
 
         if not df_c.empty:
+            value_cols = [c for c in ["promedio_valor", "max_valor", "min_valor"] if c in df_c.columns]
             df_c_pivot = df_c.pivot_table(
                 index=["codigoestacion", "anio", "mes"],
                 columns="variable",
-                values=["promedio_valor", "max_valor", "min_valor"],
+                values=value_cols,
                 aggfunc="mean",
             ).reset_index()
 
             df_c_pivot.columns = ["_".join([str(p) for p in col if p]).strip("_") for col in df_c_pivot.columns]
+            
+            logger.info("CLIMA: columnas post-pivot: %s", df_c_pivot.columns.tolist())
 
             rename_cols = {
                 "codigoestacion": "id_estacion",
                 "promedio_valor_temperatura_media_c": "temperatura_media_c",
+                "promedio_valor_temperatura_max_c": "temperatura_max_c",
+                "promedio_valor_temperatura_min_c": "temperatura_min_c",
                 "max_valor_temperatura_media_c": "temperatura_max_c",
                 "min_valor_temperatura_media_c": "temperatura_min_c",
                 "promedio_valor_humedad_relativa_pct": "humedad_relativa_pct",
                 "promedio_valor_brillo_solar_horas_dia": "brillo_solar_horas_dia",
             }
+            
+            # Rename defensivo: solo renombrar lo que existe
+            rename_cols = {k: v for k, v in rename_cols.items() if k in df_c_pivot.columns}
             df_c_pivot = df_c_pivot.rename(columns=rename_cols)
+
+            # Asegurar que las columnas esperadas existan aunque sean NaN
+            for expected in ["temperatura_media_c", "temperatura_max_c", "temperatura_min_c",
+                             "humedad_relativa_pct", "brillo_solar_horas_dia"]:
+                if expected not in df_c_pivot.columns:
+                    logger.warning("CLIMA: columna '%s' ausente del pivot — revisar sensores IDEAM", expected)
+                    df_c_pivot[expected] = np.nan
+
             df_c_pivot["anio"] = pd.to_numeric(df_c_pivot["anio"], errors="coerce").astype("Int64")
             df_c_pivot["mes"] = pd.to_numeric(df_c_pivot["mes"], errors="coerce").astype("Int64")
 
@@ -185,6 +208,25 @@ def unificar_clima_mensual(df_precip: pd.DataFrame,
         result = result_dfs[0].merge(result_dfs[1], on=["id_estacion", "anio", "mes"], how="outer")
     else:
         result = result_dfs[0]
+
+    metric_cols = [
+        "precipitacion_mm",
+        "temperatura_media_c",
+        "temperatura_max_c",
+        "temperatura_min_c",
+        "humedad_relativa_pct",
+        "brillo_solar_horas_dia",
+    ]
+    metric_cols = [c for c in metric_cols if c in result.columns]
+    if metric_cols:
+        before = len(result)
+        result = result.dropna(subset=metric_cols, how="all")
+        dropped = before - len(result)
+        if dropped:
+            logger.warning(
+                "CLIMA: %s filas sin ninguna metrica util fueron descartadas",
+                dropped,
+            )
 
     # Corrección 2.1.c: Propagar es_sintetico
     result["tiene_datos_sinteticos"] = has_synthetic

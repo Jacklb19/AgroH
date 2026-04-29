@@ -9,23 +9,18 @@ Correcciones aplicadas:
   - Corrección 3.4.c (2026-04-29): Filtrar datos sintéticos antes del upsert de insumos.
 """
 import logging
-import unicodedata
-
 import numpy as np
 import pandas as pd
 
 from .db import upsert
 from clean.clean_municipios import DataQualityError
+from clean.text_utils import normalizar_clave_texto
 
 logger = logging.getLogger(__name__)
 
 def _normalizar_nombre(valor: str) -> str:
     """Normaliza nombres para cruces (Mayúsculas, sin acentos)."""
-    if not isinstance(valor, str):
-        return ""
-    valor = unicodedata.normalize("NFD", valor.strip().upper())
-    valor = "".join(c for c in valor if unicodedata.category(c) != "Mn")
-    return " ".join(valor.split())
+    return normalizar_clave_texto(valor)
 
 def _safe_read_sql(query: str, engine) -> pd.DataFrame:
     """Lectura segura de SQL con log en caso de error."""
@@ -49,9 +44,9 @@ def load_all_facts(engine, df_produccion: pd.DataFrame):
 
     # 1. Recuperar dimensiones necesarias
     dim_cultivo_db = _safe_read_sql("SELECT id_cultivo, nombre_normalizado FROM dim_cultivo", engine)
-    # Corrección 3.4.a: Usar es_cierre_anual en vez de WHERE mes = 12
+    # Corrección 3.4.a: Usar mes = 1 como representativo para datos anuales
     dim_tiempo_db = _safe_read_sql(
-        "SELECT id_tiempo, anio FROM dim_tiempo WHERE es_cierre_anual = TRUE",
+        "SELECT id_tiempo, anio FROM dim_tiempo WHERE mes = 1",
         engine
     )
 
@@ -125,6 +120,19 @@ def load_fact_clima_mensual(engine, df_clima_mensual: pd.DataFrame):
         if c not in df.columns: df[c] = np.nan
 
     df_fact = df[cols_fact].dropna(subset=["id_estacion", "id_municipio", "id_tiempo"])
+    metric_cols = [
+        "precipitacion_mm",
+        "temperatura_media_c",
+        "temperatura_max_c",
+        "temperatura_min_c",
+        "humedad_relativa_pct",
+        "brillo_solar_horas_dia",
+    ]
+    before = len(df_fact)
+    df_fact = df_fact.dropna(subset=metric_cols, how="all")
+    dropped = before - len(df_fact)
+    if dropped:
+        logger.warning("FACT_CLIMA: %s filas sin metricas climaticas fueron omitidas.", dropped)
     upsert(engine, "fact_clima_mensual", df_fact, ["id_estacion", "id_tiempo"])
 
 def load_fact_alerta_enso(engine, df_boletines: pd.DataFrame):

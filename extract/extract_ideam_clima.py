@@ -243,6 +243,7 @@ def _extract_variable(
     all_dfs = []
     consecutive_failures = 0
     prev_anio = None
+    had_success = False
 
     for anio, mes in _iter_anio_mes(CLIMA_YEAR_START, YEAR_END):
         # Reiniciar el contador al cambiar de año
@@ -255,19 +256,21 @@ def _extract_variable(
 
         if df_m is not None:
             consecutive_failures = 0
+            had_success = True
         else:
             df_m = _download_month_fast(url, agg_func, anio, mes, include_sensor=include_sensor)
             if not df_m.empty:
                 df_m.to_parquet(cache, index=False)
                 logger.info(f"  {anio}-{mes:02d}: {len(df_m)} registros descargados")
                 consecutive_failures = 0
+                had_success = True
             else:
                 consecutive_failures += 1
                 logger.warning(
                     f"  {variable_name} — {anio}-{mes:02d}: sin datos "
                     f"({consecutive_failures}/{MAX_CONSECUTIVE_FAILURES} fallos consecutivos)"
                 )
-                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                if had_success and consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                     logger.warning(
                         f"{variable_name}: {consecutive_failures} meses consecutivos sin respuesta. "
                         "El servidor parece caído — se omite el resto de la descarga."

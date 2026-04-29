@@ -108,8 +108,14 @@ def run_core_etl(engine=None):
         df_cultivos = df_cultivos.rename(columns={
             "cultivo": "nombre_cultivo", "grupo_de_cultivo": "familia_botanica", "ciclo_de_cultivo": "tipo_ciclo"
         })
-        from load.load_facts import _normalizar_nombre
-        df_cultivos["nombre_normalizado"] = df_cultivos["nombre_cultivo"].astype(str).apply(_normalizar_nombre)
+        from clean.text_utils import normalizar_clave_texto
+        df_cultivos["nombre_normalizado"] = df_cultivos["nombre_cultivo"].astype(str).apply(normalizar_clave_texto)
+        # Consolidar variantes de escritura que colapsan a la misma llave natural.
+        df_cultivos = (
+            df_cultivos
+            .sort_values(["nombre_normalizado", "nombre_cultivo"])
+            .drop_duplicates(subset=["nombre_normalizado"], keep="first")
+        )
         df_cultivos["tipo_ciclo"] = df_cultivos["tipo_ciclo"].astype(str).str.lower()
         df_cultivos.loc[~df_cultivos["tipo_ciclo"].isin(['transitorio','permanente']), "tipo_ciclo"] = None
         df_cultivos = df_cultivos.replace({np.nan: None, "nan": None, "None": None})

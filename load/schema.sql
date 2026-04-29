@@ -211,19 +211,56 @@ CREATE INDEX IF NOT EXISTS idx_fact_clima_mun_tiempo
 DROP VIEW IF EXISTS v_dashboard_agro CASCADE;
 
 CREATE OR REPLACE VIEW v_dashboard_agro AS
-WITH clima_anual AS (
+WITH produccion_anual AS (
+    SELECT *
+    FROM (
+        SELECT
+            fp.*,
+            t.anio,
+            ROW_NUMBER() OVER (
+                PARTITION BY fp.id_municipio, fp.id_cultivo, t.anio
+                ORDER BY t.es_cierre_anual DESC, fp.id_tiempo DESC
+            ) AS rn
+        FROM fact_produccion_agricola fp
+        JOIN dim_tiempo t ON t.id_tiempo = fp.id_tiempo
+    ) ranked
+    WHERE rn = 1
+),
+clima_anual AS (
     SELECT fc.id_municipio,
         tc.anio,
         AVG(fc.precipitacion_mm) AS precipitacion_mm_prom,
         SUM(fc.precipitacion_mm) AS precipitacion_mm_total,
         AVG(fc.temperatura_media_c) AS temperatura_media_c,
         AVG(fc.temperatura_max_c) AS temperatura_max_c,
-        AVG(fc.temperatura_min_c) AS temperatura_min_c,
-        AVG(fc.humedad_relativa_pct) AS humedad_relativa_pct,
-        AVG(fc.brillo_solar_horas_dia) AS brillo_solar_horas_dia
+        AVG(fc.temperatura_min_c) AS temperatura_min_c
     FROM fact_clima_mensual fc
     JOIN dim_tiempo tc ON tc.id_tiempo = fc.id_tiempo
     GROUP BY fc.id_municipio, tc.anio
+),
+clima_combinado_reciente AS (
+    SELECT *
+    FROM (
+        SELECT
+            fc.id_municipio,
+            tc.anio AS clima_fuente_anio,
+            tc.mes AS clima_fuente_mes,
+            fc.temperatura_media_c,
+            fc.temperatura_max_c,
+            fc.temperatura_min_c,
+            ROW_NUMBER() OVER (
+                PARTITION BY fc.id_municipio
+                ORDER BY
+                    tc.anio DESC,
+                    tc.mes DESC
+            ) AS rn
+        FROM fact_clima_mensual fc
+        JOIN dim_tiempo tc ON tc.id_tiempo = fc.id_tiempo
+        WHERE fc.temperatura_media_c IS NOT NULL
+           OR fc.temperatura_max_c IS NOT NULL
+           OR fc.temperatura_min_c IS NOT NULL
+    ) ranked
+    WHERE rn = 1
 )
 SELECT m.id_municipio AS codigo_divipola,
     m.nombre_municipio,
@@ -233,24 +270,29 @@ SELECT m.id_municipio AS codigo_divipola,
     m.longitud_centroide,
     c.nombre_cultivo,
     c.tipo_ciclo,
-    t.anio,
+    fp.anio,
     fp.area_sembrada_ha,
     fp.area_cosechada_ha,
     fp.produccion_total_ton,
     fp.rendimiento_t_ha,
     ca.precipitacion_mm_prom,
     ca.precipitacion_mm_total,
-    ca.temperatura_media_c,
-    ca.temperatura_max_c,
-    ca.temperatura_min_c,
-    ca.humedad_relativa_pct,
-    ca.brillo_solar_horas_dia
-FROM fact_produccion_agricola fp
+    ccr.temperatura_media_c,
+    GREATEST(ccr.temperatura_max_c, ccr.temperatura_min_c) AS temperatura_max_c,
+    LEAST(ccr.temperatura_max_c, ccr.temperatura_min_c) AS temperatura_min_c,
+    ccr.clima_fuente_anio,
+    ccr.clima_fuente_mes
+FROM produccion_anual fp
 JOIN dim_municipio m ON m.id_municipio = fp.id_municipio
 JOIN dim_cultivo c ON c.id_cultivo = fp.id_cultivo
-JOIN dim_tiempo t ON t.id_tiempo = fp.id_tiempo
 LEFT JOIN dim_region_natural rn ON rn.id_region = m.id_region
-LEFT JOIN clima_anual ca ON ca.id_municipio = fp.id_municipio AND ca.anio = t.anio;
+LEFT JOIN clima_anual ca ON ca.id_municipio = fp.id_municipio AND ca.anio = fp.anio
+LEFT JOIN clima_combinado_reciente ccr ON ccr.id_municipio = fp.id_municipio
+WHERE ca.precipitacion_mm_prom IS NOT NULL
+   OR ca.precipitacion_mm_total IS NOT NULL
+   OR ccr.temperatura_media_c IS NOT NULL
+   OR ccr.temperatura_max_c IS NOT NULL
+   OR ccr.temperatura_min_c IS NOT NULL;
 
 
 -- Vista 2: Monitor climático mensual con fase ENSO
@@ -271,25 +313,49 @@ SELECT
     t.trimestre,
     fc.precipitacion_mm,
     fc.temperatura_media_c,
-    fc.temperatura_max_c,
-    fc.temperatura_min_c,
-    fc.humedad_relativa_pct,
-    fc.brillo_solar_horas_dia,
-    fe.fase_enso,
-    fe.indice_oni,
+    GREATEST(fc.temperatura_max_c, fc.temperatura_min_c) AS temperatura_max_c,
+    LEAST(fc.temperatura_max_c, fc.temperatura_min_c) AS temperatura_min_c,
+    COALESCE(fe.fase_enso, fe_prev.fase_enso, 'Sin dato') AS fase_enso,
+    COALESCE(fe.indice_oni, fe_prev.indice_oni) AS indice_oni,
     t.es_anio_nino
 FROM fact_clima_mensual fc
 JOIN dim_estacion_ideam e ON e.id_estacion = fc.id_estacion
 JOIN dim_municipio m ON m.id_municipio = fc.id_municipio
 JOIN dim_tiempo t ON t.id_tiempo = fc.id_tiempo
 LEFT JOIN dim_region_natural rn ON rn.id_region = m.id_region
-LEFT JOIN fact_alerta_enso fe ON fe.id_tiempo = fc.id_tiempo AND fe.id_region = m.id_region;
+LEFT JOIN fact_alerta_enso fe ON fe.id_tiempo = fc.id_tiempo AND fe.id_region = m.id_region
+LEFT JOIN LATERAL (
+    SELECT fe2.fase_enso, fe2.indice_oni
+    FROM fact_alerta_enso fe2
+    WHERE fe2.id_region = m.id_region
+      AND fe2.id_tiempo < fc.id_tiempo
+    ORDER BY fe2.id_tiempo DESC
+    LIMIT 1
+) fe_prev ON TRUE
+WHERE fc.temperatura_media_c IS NOT NULL
+   OR fc.temperatura_max_c IS NOT NULL
+   OR fc.temperatura_min_c IS NOT NULL;
 
 
 -- Vista 3: Predicciones del modelo IA vs. datos reales
 DROP VIEW IF EXISTS v_predicciones_modelo CASCADE;
 
 CREATE OR REPLACE VIEW v_predicciones_modelo AS
+WITH pred_anual AS (
+    SELECT *
+    FROM (
+        SELECT
+            pr.*,
+            t.anio,
+            ROW_NUMBER() OVER (
+                PARTITION BY pr.id_municipio, pr.id_cultivo, t.anio
+                ORDER BY t.es_cierre_anual DESC, pr.id_tiempo DESC
+            ) AS rn
+        FROM pred_rendimiento pr
+        JOIN dim_tiempo t ON t.id_tiempo = pr.id_tiempo
+    ) ranked
+    WHERE rn = 1
+)
 SELECT
     m.id_municipio AS codigo_divipola,
     m.nombre_municipio,
@@ -298,19 +364,18 @@ SELECT
     m.latitud_centroide,
     m.longitud_centroide,
     c.nombre_cultivo,
-    t.anio,
+    pr.anio,
     fp.rendimiento_t_ha AS rendimiento_real,
-    pr.rendimiento_predicho_t_ha AS rendimiento_predicho,
-    ABS(fp.rendimiento_t_ha - pr.rendimiento_predicho_t_ha) AS error_absoluto,
-    pr.intervalo_confianza_inferior,
-    pr.intervalo_confianza_superior,
+    GREATEST(pr.rendimiento_predicho_t_ha, 0) AS rendimiento_predicho,
+    ABS(fp.rendimiento_t_ha - GREATEST(pr.rendimiento_predicho_t_ha, 0)) AS error_absoluto,
+    GREATEST(pr.intervalo_confianza_inferior, 0) AS intervalo_confianza_inferior,
+    GREATEST(pr.intervalo_confianza_superior, GREATEST(pr.intervalo_confianza_inferior, 0), 0) AS intervalo_confianza_superior,
     mv.nombre_modelo,
     mv.metricas_json,
     mv.fecha_entrenamiento
-FROM pred_rendimiento pr
+FROM pred_anual pr
 JOIN dim_municipio m ON m.id_municipio = pr.id_municipio
 JOIN dim_cultivo c ON c.id_cultivo = pr.id_cultivo
-JOIN dim_tiempo t ON t.id_tiempo = pr.id_tiempo
 JOIN model_version mv ON mv.id_version = pr.id_version AND mv.activo = TRUE
 LEFT JOIN dim_region_natural rn ON rn.id_region = m.id_region
 LEFT JOIN fact_produccion_agricola fp

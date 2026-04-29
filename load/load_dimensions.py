@@ -15,6 +15,7 @@ import pandas as pd
 
 from config.settings import REGIONES_NATURALES, YEAR_START, YEAR_END, MES_CIERRE_CAMPANA
 from .db import upsert
+from clean.text_utils import normalizar_clave_texto
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,7 @@ def update_dim_tiempo_with_oni(engine):
     Corrección 3.3.a.
     """
     anios_nino = _calcular_anios_nino_from_oni(engine)
+    anios_nino = {int(anio) for anio in anios_nino}
     if anios_nino and anios_nino != ANIOS_NINO_FALLBACK:
         try:
             from sqlalchemy import text
@@ -196,7 +198,19 @@ def load_dim_municipio(engine, df_divipola: pd.DataFrame, df_region_map: pd.Data
 
 def load_dim_cultivo(engine, df_cultivos: pd.DataFrame):
     """Carga catálogo de cultivos."""
-    upsert(engine, "dim_cultivo", df_cultivos, ["nombre_normalizado"])
+    if df_cultivos is None or df_cultivos.empty:
+        logger.warning("DIM_CULTIVO: No hay cultivos para cargar.")
+        return
+    df = df_cultivos.copy()
+    if "nombre_cultivo" in df.columns:
+        df["nombre_normalizado"] = df["nombre_cultivo"].astype(str).apply(normalizar_clave_texto)
+    if "nombre_normalizado" in df.columns:
+        df = df.sort_values(["nombre_normalizado", "nombre_cultivo"]).drop_duplicates(
+            subset=["nombre_normalizado"], keep="first"
+        )
+    else:
+        df = df.drop_duplicates()
+    upsert(engine, "dim_cultivo", df, ["nombre_normalizado"])
 
 def load_dim_estacion_ideam(engine, df_estaciones: pd.DataFrame):
     """Carga catálogo de estaciones IDEAM."""

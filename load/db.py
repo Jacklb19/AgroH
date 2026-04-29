@@ -61,22 +61,34 @@ def get_engine(fail_silently: bool = False) -> Engine:
 
 def init_schema(engine: Engine):
     """
-    Ejecuta schema.sql para crear todas las tablas si no existen.
+    Ejecuta schema.sql y las migraciones versionadas para crear/actualizar la BD.
     """
     if engine is None:
         logger.error("DB: No se puede inicializar schema sin motor de base de datos.")
         return
 
     import os
-    schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
+    from pathlib import Path
+
+    load_dir = Path(__file__).resolve().parent
+    schema_path = load_dir / "schema.sql"
     try:
         with open(schema_path, "r", encoding="utf-8") as f:
             sql = f.read()
         with engine.begin() as conn:
             conn.execute(text(sql))
         logger.info("DB: Schema inicializado correctamente")
+
+        migrations_dir = load_dir / "migrations"
+        for migration_path in sorted(migrations_dir.glob("*.sql")):
+            with open(migration_path, "r", encoding="utf-8") as f:
+                migration_sql = f.read()
+            with engine.begin() as conn:
+                conn.execute(text(migration_sql))
+            logger.info("DB: Migración aplicada/verificada: %s", migration_path.name)
     except Exception as e:
         logger.error("DB: Error al inicializar schema: %s", e)
+        raise
 
 
 def upsert(engine: Engine, table: str, df, conflict_cols: list):
@@ -133,6 +145,7 @@ def upsert(engine: Engine, table: str, df, conflict_cols: list):
         logger.info("DB: %s -> %s filas insertadas/actualizadas", table, len(records))
     except Exception as e:
         logger.error("DB: Error en upsert para tabla %s: %s", table, e)
+        raise
 
 
 def upsert_batch(engine: Engine, table_name: str, records: list[dict],

@@ -191,11 +191,7 @@ def train_and_report(engine=None) -> dict:
     df_pred = pd.concat([df_test, df_train])
 
     # Obtener id_tiempo representativo por año (usando es_cierre_anual)
-    df_tiempo = pd.read_sql(
-        "SELECT id_tiempo, anio FROM dim_tiempo WHERE es_cierre_anual = TRUE",
-        engine
-    )
-    df_pred = df_pred.merge(df_tiempo, on="anio", how="left")
+    # df_pred ya contiene id_tiempo de fact_produccion_agricola
 
     # Intervalo de confianza aproximado (± 1 MAE)
     df_pred["intervalo_confianza_inferior"] = df_pred["rendimiento_predicho_t_ha"] - mae

@@ -440,6 +440,7 @@ def train_and_report(engine=None) -> dict:
         engine
     )
     df_pred_base = df[["id_municipio", "anio"]].copy()
+    df_pred_base["anio"] = pd.to_numeric(df_pred_base["anio"], errors="coerce").fillna(0).astype(int)
     df_pred_base = df_pred_base.merge(df_tiempo_cierre, on="anio", how="left")
 
     df_pred = df_pred_base.copy()
