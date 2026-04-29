@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS fact_alerta_enso (
     id_tiempo        INT  NOT NULL REFERENCES dim_tiempo(id_tiempo),
     id_region        INT  NOT NULL REFERENCES dim_region_natural(id_region),
     fase_enso        VARCHAR(20), -- El Niño, La Niña, Neutro
-    indice_spi       DOUBLE PRECISION,
+    indice_oni       DOUBLE PRECISION,
     anomalia_precipitacion_pct DOUBLE PRECISION,
     probabilidad_deficit_hidrico DOUBLE PRECISION,
     probabilidad_exceso_hidrico  DOUBLE PRECISION,
@@ -300,7 +300,7 @@ SELECT
     fc.humedad_relativa_pct,
     fc.brillo_solar_horas_dia,
     fe.fase_enso,
-    fe.indice_spi,
+    fe.indice_oni,
     t.es_anio_nino
 FROM fact_clima_mensual fc
 JOIN dim_estacion_ideam e ON e.id_estacion = fc.id_estacion

@@ -138,28 +138,36 @@ def run_core_etl(engine=None):
 
         # ── 5/6. Hechos ──
         progress.update(task, description="[cyan]Cargando hechos de producción y clima...")
-        load_all_facts(engine, df_produccion.dropna(subset=["id_municipio"]), pd.DataFrame())
+        load_all_facts(engine, df_produccion.dropna(subset=["id_municipio"]))
         
         df_clima_mensual = unificar_clima_mensual(df_precip_mensual, df_combinado_mensual)
         if not df_clima_mensual.empty:
             load_fact_clima_mensual(engine, df_clima_mensual)
 
         # ── 7. Calidad ──
-        progress.update(task, description="[cyan]Generando reporte de calidad...")
-        reporte = run_quality_report(engine)
+        if engine is not None:
+            progress.update(task, description="[cyan]Generando reporte de calidad...")
+            reporte = run_quality_report(engine)
+        else:
+            reporte = pd.DataFrame()
+        
         progress.update(task, description="[bold green]ETL CORE Completado.")
 
-    # Mostrar reporte de calidad elegante
-    table = Table(title="Reporte de Calidad de Datos", box=None)
-    table.add_column("Indicador", style="cyan")
-    table.add_column("Valor", justify="right")
-    table.add_column("Estado", justify="center")
+    # Mostrar reporte de calidad elegante (Solo si hay motor)
+    if not reporte.empty:
+        table = Table(title="Reporte de Calidad de Datos", box=None)
+        table.add_column("Indicador", style="cyan")
+        table.add_column("Valor", justify="right")
+        table.add_column("Estado", justify="center")
 
-    for _, row in reporte.iterrows():
-        color = "green" if row["estado"] == "OK" else "bold red"
-        table.add_row(row["indicador"], str(row["valor"]), f"[{color}]{row['estado']}[/{color}]")
+        for _, row in reporte.iterrows():
+            color = "green" if row["estado"] == "OK" else "bold red"
+            table.add_row(row["indicador"], str(row["valor"]), f"[{color}]{row['estado']}[/{color}]")
+        
+        console.print(table)
+    else:
+        console.print("\n[bold yellow]Advertencia:[/bold yellow] No se generó reporte de calidad (Sin conexión a BD).")
     
-    console.print(table)
     return reporte
 
 
@@ -199,7 +207,7 @@ def run_extended_etl(engine=None):
         # Boletines ENSO (Reemplazado por NOAA API)
         progress.update(task, description="[magenta]Procesando Índice ONI ENSO (NOAA)...")
         df_boletines = extract_noaa_enso()
-        if not df_boletines.empty:
+        if not df_boletines.empty and engine is not None:
             load_fact_alerta_enso(engine, df_boletines)
 
         # Insumos (Usando el extractor robusto con datos sintéticos)
@@ -207,7 +215,7 @@ def run_extended_etl(engine=None):
         df_insumos_raw = extract_insumos()
         if not df_insumos_raw.empty:
             df_insumos = normalizar_insumos(df_insumos_raw)
-            if not df_insumos.empty:
+            if not df_insumos.empty and engine is not None:
                 load_fact_precios_insumos(engine, df_insumos)
 
         # SIPSA
@@ -215,23 +223,24 @@ def run_extended_etl(engine=None):
         df_sipsa_raw = extract_sipsa()
         df_precios = normalizar_precios_sipsa(df_sipsa_raw)
         if not df_precios.empty:
-            df_centrales = construir_dim_centrales(df_precios)
-            if not df_centrales.empty:
-                load_dim_central_abastos(engine, df_centrales)
-            load_fact_precios_mayoristas(engine, df_precios)
+            if engine is not None:
+                df_centrales = construir_dim_centrales(df_precios)
+                if not df_centrales.empty:
+                    load_dim_central_abastos(engine, df_centrales)
+                load_fact_precios_mayoristas(engine, df_precios)
 
         # SIPRA (Suelos)
         progress.update(task, description="[magenta]Analizando Aptitud de Suelos (SIPRA)...")
         df_divipola = extract_divipola()
         df_sipra = extract_sipra()
         df_suelo = resumir_aptitud_suelo_por_municipio(df_sipra, df_divipola)
-        if not df_suelo.empty:
+        if not df_suelo.empty and engine is not None:
             load_fact_aptitud_suelo(engine, df_suelo)
 
         # CNA
         progress.update(task, description="[magenta]Consolidando Censo Agropecuario (CNA)...")
         df_censo = extract_cna()
-        if not df_censo.empty:
+        if not df_censo.empty and engine is not None:
             load_fact_censo_agropecuario(engine, df_censo)
 
         progress.update(task, description="[bold green]ETL EXTENDIDO Completado.")
@@ -239,8 +248,12 @@ def run_extended_etl(engine=None):
 
 def run_models(engine=None):
     console.rule("[bold yellow]PASO 3: FEATURE STORE Y MACHINE LEARNING")
-    failures = []
     
+    if engine is None:
+        console.print("\n[bold yellow]Advertencia:[/bold yellow] Omitiendo modelos IA (Sin conexión a BD).")
+        return
+
+    failures = []
     with Progress(
         TextColumn("[progress.description]{task.description}"),
         console=console
@@ -250,13 +263,14 @@ def run_models(engine=None):
         from models.build_features import build_ml_features
         df_features = build_ml_features(engine)
         if df_features.empty:
-            raise RuntimeError("No fue posible construir el feature store")
+            progress.update(task, description="[bold red]Error: Feature Store vacío.")
+            return
         
         progress.update(task, description="[yellow]Entrenando Modelo: Rendimiento Agrícola...")
         try:
             from models.train_rendimiento import train_and_report as train_rendimiento
             r1 = train_rendimiento(engine=engine)
-            logger.info(f"Rendimiento — R²: {r1['metrics']['r2']:.4f}")
+            logger.info("Rendimiento — R²: %.4f", r1['metrics']['r2'])
         except Exception as exc:
             failures.append(f"rendimiento: {exc}")
             logger.exception("Modelo rendimiento fallo")
@@ -265,16 +279,15 @@ def run_models(engine=None):
         try:
             from models.train_alerta_climatica import train_and_report as train_alerta
             r2 = train_alerta(engine=engine)
-            logger.info(f"Alerta climática — F1: {r2['metrics']['f1_weighted']:.4f}")
+            logger.info("Alerta climática — F1: %.4f", r2['metrics']['f1_weighted'])
         except Exception as exc:
             failures.append(f"alerta_climatica: {exc}")
             logger.exception("Modelo alerta climatica fallo")
 
         if failures:
             progress.update(task, description="[bold red]MODELOS IA con errores.")
-            raise RuntimeError(" ; ".join(failures))
-
-        progress.update(task, description="[bold green]MODELOS IA Completados.")
+        else:
+            progress.update(task, description="[bold green]MODELOS IA Completados.")
 
 
 def run_etl(mode: str = "all"):

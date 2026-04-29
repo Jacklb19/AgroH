@@ -220,7 +220,6 @@ def train_and_report(engine=None) -> dict:
             subsample=0.85,
             colsample_bytree=0.85,
             random_state=42,
-            use_label_encoder=False,
             eval_metric="mlogloss",
         )
         model_name = "xgboost_alerta_climatica"

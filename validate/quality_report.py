@@ -109,7 +109,15 @@ CHECKS = [
 ]
 
 def run_quality_report(engine) -> pd.DataFrame:
+    """
+    Ejecuta el reporte de calidad de datos en la BD.
+    # FIX v1: Manejo robusto de motor None y estandarización de logs.
+    """
     resultados = []
+    if engine is None:
+        logger.warning("CALIDAD: No se puede generar reporte sin motor de base de datos.")
+        return pd.DataFrame()
+
     with engine.connect() as conn:
         for check in CHECKS:
             try:

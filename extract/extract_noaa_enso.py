@@ -2,6 +2,8 @@ import pandas as pd
 import requests
 import logging
 import io
+import numpy as np
+from datetime import datetime
 from pathlib import Path
 from config.settings import DATA_RAW, YEAR_END
 
@@ -13,21 +15,28 @@ URL_NOAA_PRIMARY = "https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/e
 URL_NOAA_FALLBACK = "https://psl.noaa.gov/data/correlation/nina34.anom.data"
 
 def extract_noaa_enso() -> pd.DataFrame:
-    """Extrae el índice ONI directamente de la NOAA, reemplazando PDFs."""
-    logger.info("Extrayendo datos de ENSO desde NOAA (ONI Index)...")
+    """
+    Extrae el índice ONI directamente de la NOAA, reemplazando PDFs.
+    # FIX v1: Renombrado semántico (oni vs spi), fechas reales, ruido autocorrelacionado y timeouts.
+    """
+    logger.info("NOAA ENSO: iniciando extracción (ONI Index)...")
+    out_dir = DATA_RAW / "noaa"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "enso_noaa_raw.parquet"
+    
     try:
         # Intentar URLs con timeout y fallback
         text = None
         for url in [URL_NOAA_PRIMARY, URL_NOAA_FALLBACK]:
             try:
-                logger.info(f"Intentando: {url}")
-                resp = requests.get(url, timeout=30)
+                logger.info("NOAA ENSO: intentando %s", url)
+                resp = requests.get(url, timeout=60)
                 resp.raise_for_status()
                 text = resp.text
-                logger.info(f"Conexión exitosa: {url}")
+                logger.info("NOAA ENSO: conexión exitosa")
                 break
             except requests.RequestException as req_err:
-                logger.warning(f"Fallo en {url}: {req_err}")
+                logger.warning("NOAA ENSO: fallo en %s: %s", url, req_err)
                 continue
 
         if text is None:
@@ -46,45 +55,50 @@ def extract_noaa_enso() -> pd.DataFrame:
             return "Neutro"
             
         df["fase_enso"] = df["ANOM"].apply(get_fase)
-        df = df.rename(columns={"YR": "anio", "MON": "mes", "ANOM": "indice_spi"})
+        df = df.rename(columns={"YR": "anio", "MON": "mes", "ANOM": "indice_oni"})
         df["fuente_origen"] = "NOAA ONI"
         df["es_sintetico"] = False
         
-        # Crear fecha
-        df["fecha"] = pd.to_datetime(df.assign(day=1).rename(columns={"anio": "year", "mes": "month"})[["year", "month", "day"]])
+        # Crear fecha directamente desde columnas
+        df["fecha"] = pd.to_datetime({"year": df["anio"], "month": df["mes"], "day": 1})
         
         # Guardar
-        out_path = DATA_RAW / "enso_noaa_raw.csv"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(out_path, index=False)
-        logger.info(f"NOAA ENSO: {len(df)} meses extraídos -> {out_path}")
+        df.to_parquet(out_path, index=False)
+        logger.info("NOAA ENSO: %s meses extraídos -> %s", len(df), out_path)
         return df
+        
     except Exception as e:
-        logger.error(f"Error al extraer ENSO de NOAA (generando sintéticos como fallback): {e}")
-        # Generar datos sintéticos de fallback
-        import numpy as np
-        dates = pd.date_range("2015-01", f"{YEAR_END}-12", freq="MS")
+        logger.error("NOAA ENSO: fallo en extracción, generando sintéticos: %s", e)
+        
+        # Generar datos sintéticos de fallback (sin fechas futuras)
+        now = datetime.now()
+        end_month = f"{now.year}-{now.month:02d}"
+        dates = pd.date_range("2015-01", end_month, freq="MS")
+        
         df_synth = pd.DataFrame({"fecha": dates})
         df_synth["anio"] = df_synth["fecha"].dt.year
         df_synth["mes"] = df_synth["fecha"].dt.month
         
-        # Simular ciclo ENSO (aprox 3-7 años)
-        t = np.arange(len(df_synth))
-        enso_cycle = np.sin(2 * np.pi * t / 48) + np.random.normal(0, 0.3, len(t))
-        df_synth["indice_spi"] = np.round(enso_cycle, 2)
+        # Ruido con autocorrelación suave (más realista que seno puro)
+        rng = np.random.default_rng(42)
+        raw_noise = rng.normal(0, 0.8, len(df_synth))
+        # Usar media móvil de 3 meses para autocorrelación mínima
+        kernel = np.ones(3) / 3
+        enso_signal = np.convolve(raw_noise, kernel, mode='same')
+        df_synth["indice_oni"] = np.round(enso_signal, 2)
         
         def get_fase(anom):
             if anom >= 0.5: return "El Niño"
             if anom <= -0.5: return "La Niña"
             return "Neutro"
             
-        df_synth["fase_enso"] = df_synth["indice_spi"].apply(get_fase)
+        df_synth["fase_enso"] = df_synth["indice_oni"].apply(get_fase)
         df_synth["fuente_origen"] = "NOAA ONI (fallback sintetico)"
         df_synth["es_sintetico"] = True
         
-        out_path = DATA_RAW / "enso_noaa_raw_synth.csv"
-        df_synth.to_csv(out_path, index=False)
-        logger.info(f"NOAA ENSO SINTÉTICO: {len(df_synth)} meses generados -> {out_path}")
+        out_path_synth = out_dir / "enso_noaa_raw_synth.parquet"
+        df_synth.to_parquet(out_path_synth, index=False)
+        logger.info("NOAA ENSO SINTÉTICO: %s meses generados -> %s", len(df_synth), out_path_synth)
         return df_synth
 
 if __name__ == "__main__":

@@ -70,10 +70,19 @@ def build_synonym_map() -> dict:
 
 def load_divipola_map() -> dict:
     """
-    Carga el CSV de DIVIPOLA descargado y devuelve {nombre_normalizado: codigo_divipola}.
+    Carga el catálogo DIVIPOLA y devuelve {nombre_normalizado: codigo_divipola}.
+    # FIX v1: Compatibilidad con nuevo formato Parquet y subdirectorios.
     """
-    path = DATA_RAW / "divipola.csv"
-    df = pd.read_csv(path, dtype=str)
+    path_parquet = DATA_RAW / "divipola" / "divipola_raw.parquet"
+    path_csv = DATA_RAW / "divipola.csv"
+    
+    if path_parquet.exists():
+        df = pd.read_parquet(path_parquet)
+    elif path_csv.exists():
+        df = pd.read_csv(path_csv, dtype=str)
+    else:
+        logger.error("DIVIPOLA: No se encontró el archivo de referencia en %s", path_parquet)
+        return {}
     result = {}
     for _, row in df.iterrows():
         nombre = _normalizar_texto(row.get("nom_mpio", row.get("municipio", "")))

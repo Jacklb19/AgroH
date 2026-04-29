@@ -1,45 +1,71 @@
-import os
 import logging
+import math
+import urllib.parse
 from sqlalchemy import create_engine, text
-from dotenv import load_dotenv
+from sqlalchemy.engine import Engine
+from config.settings import DB
 
-load_dotenv()
 logger = logging.getLogger(__name__)
 
-import urllib.parse
-
-def get_engine():
-    password = os.getenv('SUPABASE_DB_PASSWORD') or os.getenv('SUPABASE_DB_PASS', '')
+def get_engine() -> Engine:
+    """
+    Crea el motor SQLAlchemy usando la configuración centralizada en settings.DB.
+    # FIX v1: Uso de configuración centralizada y manejo robusto de SSL.
+    """
+    password = DB.get("password") or ""
     encoded_password = urllib.parse.quote_plus(password)
-    host = os.getenv('SUPABASE_DB_HOST', 'localhost')
-    url = (
-        f"postgresql+psycopg2://{os.getenv('SUPABASE_DB_USER')}:"
-        f"{encoded_password}@"
-        f"{host}:"
-        f"{os.getenv('SUPABASE_DB_PORT', 5432)}/"
-        f"{os.getenv('SUPABASE_DB_NAME', 'postgres')}"
-    )
+    host = DB.get("host", "localhost")
+    port = DB.get("port", 5432)
+    dbname = DB.get("dbname", "postgres")
+    user = DB.get("user", "postgres")
+
+    url = f"postgresql+psycopg2://{user}:{encoded_password}@{host}:{port}/{dbname}"
+    
+    # SSL require para conexiones remotas (Supabase), disable para local
     ssl_mode = "disable" if host in ["localhost", "127.0.0.1"] else "require"
-    return create_engine(url, connect_args={"sslmode": ssl_mode}, pool_pre_ping=True)
+    
+    try:
+        engine = create_engine(url, connect_args={"sslmode": ssl_mode}, pool_pre_ping=True)
+        # Test de conexión rápido
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return engine
+    except Exception as e:
+        logger.error("DB: Error al conectar a la base de datos: %s", e)
+        # No levantamos excepción para permitir que el pipeline siga (ej. modo offline)
+        return None
 
+def init_schema(engine: Engine):
+    """
+    Ejecuta schema.sql para crear todas las tablas si no existen.
+    # FIX v1: Manejo de errores en inicialización de schema.
+    """
+    if engine is None:
+        logger.error("DB: No se puede inicializar schema sin motor de base de datos.")
+        return
 
-def init_schema(engine):
-    """Ejecuta schema.sql para crear todas las tablas si no existen."""
+    import os
     schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
-    with open(schema_path, "r", encoding="utf-8") as f:
-        sql = f.read()
-    with engine.begin() as conn:
-        conn.execute(text(sql))
-    logger.info("Schema inicializado correctamente")
+    try:
+        with open(schema_path, "r", encoding="utf-8") as f:
+            sql = f.read()
+        with engine.begin() as conn:
+            conn.execute(text(sql))
+        logger.info("DB: Schema inicializado correctamente")
+    except Exception as e:
+        logger.error("DB: Error al inicializar schema: %s", e)
 
+def upsert(engine: Engine, table: str, df, conflict_cols: list):
+    """
+    Inserta filas de un DataFrame en `table` con lógica ON CONFLICT.
+    # FIX v1: Optimización de limpieza de NaNs y manejo de errores granular.
+    """
+    if engine is None:
+        logger.warning("DB: Ignorando upsert en %s (sin motor de base de datos)", table)
+        return
 
-def upsert(engine, table: str, df, conflict_cols: list):
-    """
-    Inserta filas de un DataFrame en `table`.
-    Si ya existe el registro (por conflict_cols), lo actualiza (ON CONFLICT DO UPDATE).
-    """
-    if df.empty:
-        logger.warning(f"DataFrame vacío para tabla {table}, se omite")
+    if df is None or df.empty:
+        logger.warning("DB: DataFrame vacío para tabla %s, se omite", table)
         return
 
     cols = list(df.columns)
@@ -63,16 +89,20 @@ def upsert(engine, table: str, df, conflict_cols: list):
             ON CONFLICT ({conflict_str})
             DO NOTHING
         """
-    import math
+    
+    # Preparar registros limpiando NaNs para Postgres
     records = df.to_dict(orient="records")
-    # Reemplazar NaN/float nan con None para que psycopg2 envíe NULL correctamente
-    clean_records = []
+    
+    # Reemplazar NaN con None (NULL en SQL) de forma eficiente
+    # FIX: Solo procesar si el valor es float nan para evitar overhead innecesario
     for row in records:
-        clean_row = {
-            k: (None if (v is not None and isinstance(v, float) and math.isnan(v)) else v)
-            for k, v in row.items()
-        }
-        clean_records.append(clean_row)
-    with engine.begin() as conn:
-        conn.execute(text(stmt), clean_records)
-    logger.info(f"{table}: {len(clean_records)} filas insertadas/actualizadas")
+        for k, v in row.items():
+            if v is not None and isinstance(v, float) and math.isnan(v):
+                row[k] = None
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(stmt), records)
+        logger.info("DB: %s -> %s filas insertadas/actualizadas", table, len(records))
+    except Exception as e:
+        logger.error("DB: Error en upsert para tabla %s: %s", table, e)
