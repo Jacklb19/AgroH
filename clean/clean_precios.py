@@ -18,6 +18,30 @@ from clean.clean_municipios import agregar_id_municipio
 
 logger = logging.getLogger(__name__)
 
+# Mapeo de homologación de nombres SIPSA -> EVA
+MAPEO_SIPSA_EVA = {
+    "BANANO*": "BANANO",
+    "MORA DE CASTILLA": "MORA",
+    "PLATANO HARTON VERDE": "PLATANO",
+    "PLATANO HARTON MADURO": "PLATANO",
+    "ARVEJA VERDE EN VAINA": "ARVEJA",
+    "CEBOLLA CABEZONA BLANCA": "CEBOLLA DE BULBO",
+    "CEBOLLA CABEZONA ROJA": "CEBOLLA DE BULBO",
+    "CEBOLLA JUNCA": "CEBOLLA DE RAMA",
+    "CHOCOLO MAZORCA": "MAIZ",
+    "LECHUGA BATAVIA": "LECHUGA",
+    "AGUACATE*": "AGUACATE",
+    "LIMON TAHITI": "LIMON",
+    "LIMON COMUN": "LIMON",
+    "MANGO TOMMY": "MANGO",
+    "MANZANA ROYAL GALA": "MANZANA",
+    "FRIJOL VERDE*": "FRIJOL",
+    "TOMATE*": "TOMATE",
+    "GUAYABA*": "GUAYABA",
+    "PINA *": "PINA",
+    "PINA*": "PINA",
+}
+
 
 def _find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
     """
@@ -82,6 +106,9 @@ def normalizar_precios_sipsa(df_raw: pd.DataFrame) -> pd.DataFrame:
 
     for col in ["producto", "nombre_central", "ciudad"]:
         df[col] = df[col].astype(str).str.replace(r"\s+", " ", regex=True).str.strip().str.upper()
+
+    # Homologación de cultivos SIPSA -> EVA
+    df["producto"] = df["producto"].replace(MAPEO_SIPSA_EVA)
 
     df["anio"] = df["fecha_registro"].dt.year
     df["mes"] = df["fecha_registro"].dt.month

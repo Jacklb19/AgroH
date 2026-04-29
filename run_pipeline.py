@@ -108,7 +108,8 @@ def run_core_etl(engine=None):
         df_cultivos = df_cultivos.rename(columns={
             "cultivo": "nombre_cultivo", "grupo_de_cultivo": "familia_botanica", "ciclo_de_cultivo": "tipo_ciclo"
         })
-        df_cultivos["nombre_normalizado"] = df_cultivos["nombre_cultivo"].astype(str).str.upper().str.strip()
+        from load.load_facts import _normalizar_nombre
+        df_cultivos["nombre_normalizado"] = df_cultivos["nombre_cultivo"].astype(str).apply(_normalizar_nombre)
         df_cultivos["tipo_ciclo"] = df_cultivos["tipo_ciclo"].astype(str).str.lower()
         df_cultivos.loc[~df_cultivos["tipo_ciclo"].isin(['transitorio','permanente']), "tipo_ciclo"] = None
         df_cultivos = df_cultivos.replace({np.nan: None, "nan": None, "None": None})
