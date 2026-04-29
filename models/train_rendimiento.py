@@ -1,16 +1,31 @@
+"""
+train_rendimiento.py — Modelo tabular de rendimiento agrícola AgroIA.
+
+Correcciones aplicadas:
+  - Corrección 3.6.a (2026-04-29): Eliminar data leakage en predicciones.
+    Predicciones solo sobre test. Train marcado con split='train'.
+    Métricas calculadas SOLO sobre conjunto de prueba.
+  - Corrección 3.6.b (2026-04-29): Codificación determinista de id_municipio
+    con OrdinalEncoder persistido en municipio_encoder.joblib.
+"""
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 
 from load.db import get_engine
+from config.settings import MODELS_DIR
 
 logger = logging.getLogger(__name__)
 
-
 from models.build_features import build_ml_features
+
+# Corrección 3.6.b: Ruta del encoder persistido
+ENCODER_PATH = MODELS_DIR / "municipio_encoder.joblib"
 
 
 def _registrar_version(engine, model_name: str, metrics: dict) -> int:
@@ -77,8 +92,11 @@ def train_and_report(engine=None) -> dict:
     """
     Entrena un modelo tabular de rendimiento agrícola.
     - Persiste la versión en model_version con métricas JSON.
-    - Escribe predicciones sobre todo el dataset en pred_rendimiento.
-    - Para un modelo final conviene sumar suelo, precios e insumos como features.
+    - Escribe predicciones SOLO sobre test y train por separado con flag de split.
+    - Métricas de evaluación calculadas SOLO sobre el conjunto de prueba.
+
+    Corrección 3.6.a: Eliminar data leakage.
+    Corrección 3.6.b: Codificación determinista con OrdinalEncoder.
     """
     if engine is None:
         engine = get_engine()
@@ -99,8 +117,23 @@ def train_and_report(engine=None) -> dict:
         "lluvia_acumulada_anual",
     ]
 
-    # Codificar id_municipio como entero (XGBoost no acepta strings)
-    df["id_municipio_enc"] = df["id_municipio"].astype(str).astype("category").cat.codes
+    # Corrección 3.6.b: Codificación determinista de id_municipio
+    from sklearn.preprocessing import OrdinalEncoder
+
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    if ENCODER_PATH.exists():
+        enc = joblib.load(ENCODER_PATH)
+        df["id_municipio_enc"] = enc.transform(df[["id_municipio"]])
+        logger.info("Encoder de municipios cargado desde %s", ENCODER_PATH)
+    else:
+        enc = OrdinalEncoder(
+            handle_unknown="use_encoded_value",
+            unknown_value=-1
+        )
+        df["id_municipio_enc"] = enc.fit_transform(df[["id_municipio"]])
+        joblib.dump(enc, ENCODER_PATH)
+        logger.info("Encoder de municipios guardado en %s", ENCODER_PATH)
 
     X = df[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
     y = df["rendimiento_t_ha"].astype(float)
@@ -130,7 +163,7 @@ def train_and_report(engine=None) -> dict:
     model.fit(X_train, y_train)
     pred_test = model.predict(X_test)
 
-    # Intervalo de confianza aproximado (± 1 MAE)
+    # Corrección 3.6.a: Métricas calculadas SOLO sobre conjunto de prueba
     mae = float(mean_absolute_error(y_test, pred_test))
     metrics = {
         "mae":    mae,
@@ -144,17 +177,30 @@ def train_and_report(engine=None) -> dict:
     # ── Persistir versión en BD ──────────────────────────────────────────
     id_version = _registrar_version(engine, model_name, metrics)
 
-    # ── Predecir sobre todo el dataset ──────────────────────────────────────
-    pred_todas = model.predict(X)
-    df_pred = df[["id_municipio", "id_cultivo", "anio"]].copy()
-    
-    # Obtener un id_tiempo representativo por año (ej. mes 12)
-    df_tiempo = pd.read_sql("SELECT id_tiempo, anio FROM dim_tiempo WHERE mes = 12", engine)
+    # ── Corrección 3.6.a: Predecir solo sobre test + train con flag ──────
+    # Solo predecir sobre el conjunto de prueba
+    df_test = df.iloc[X_test.index].copy()
+    df_test["rendimiento_predicho_t_ha"] = model.predict(X_test)
+    df_test["split"] = "test"
+
+    # Para entrenamiento, guardar predicción in-sample solo con flag explícito
+    df_train = df.iloc[X_train.index].copy()
+    df_train["rendimiento_predicho_t_ha"] = model.predict(X_train)
+    df_train["split"] = "train"  # marcar para excluir de evaluación real
+
+    df_pred = pd.concat([df_test, df_train])
+
+    # Obtener id_tiempo representativo por año (usando es_cierre_anual)
+    df_tiempo = pd.read_sql(
+        "SELECT id_tiempo, anio FROM dim_tiempo WHERE es_cierre_anual = TRUE",
+        engine
+    )
     df_pred = df_pred.merge(df_tiempo, on="anio", how="left")
-    
-    df_pred["rendimiento_predicho_t_ha"]      = pred_todas
-    df_pred["intervalo_confianza_inferior"]   = pred_todas - mae
-    df_pred["intervalo_confianza_superior"]   = pred_todas + mae
+
+    # Intervalo de confianza aproximado (± 1 MAE)
+    df_pred["intervalo_confianza_inferior"] = df_pred["rendimiento_predicho_t_ha"] - mae
+    df_pred["intervalo_confianza_superior"] = df_pred["rendimiento_predicho_t_ha"] + mae
+
     _guardar_predicciones(engine, df_pred, id_version)
 
     return {"model_name": model_name, "metrics": metrics}
@@ -164,4 +210,3 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     result = train_and_report()
     print(json.dumps(result, indent=2, ensure_ascii=False))
-

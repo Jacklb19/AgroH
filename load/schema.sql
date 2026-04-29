@@ -1,6 +1,11 @@
 -- ══════════════════════════════════════════════
 --  AgroIA Colombia — DDL completo Star Schema
 --  Motor: PostgreSQL (Supabase)
+--
+--  Corrección 3.5.a (2026-04-29): FK id_tiempo en fact_censo_agropecuario.
+--  Corrección 3.5.b (2026-04-29): Índices en columnas FK de tablas de hechos.
+--  Corrección 3.5.c (2026-04-29): ALTER TABLE separados en migrations/.
+--  Corrección 3.4.a (2026-04-29): es_cierre_anual en dim_tiempo.
 -- ══════════════════════════════════════════════
 
 -- ── CAPA 1: DIMENSIONES ────────────────────────
@@ -16,19 +21,20 @@ CREATE TABLE IF NOT EXISTS dim_municipio (
     id_departamento     CHAR(2) NOT NULL,
     nombre_departamento VARCHAR(100) NOT NULL,
     id_region           INT REFERENCES dim_region_natural(id_region),
-    latitud_centroide   DOUBLE PRECISION,
-    longitud_centroide  DOUBLE PRECISION
+    latitud_centroide   DOUBLE PRECISION,            -- NULL si no disponible (no 0.0)
+    longitud_centroide  DOUBLE PRECISION             -- NULL si no disponible (no 0.0)
 );
 
 CREATE TABLE IF NOT EXISTS dim_tiempo (
-    id_tiempo   SERIAL PRIMARY KEY,
-    fecha       DATE NOT NULL UNIQUE,               -- primer día del mes
-    anio        SMALLINT NOT NULL,
-    mes         SMALLINT NOT NULL,
-    trimestre   SMALLINT NOT NULL,
-    semestre    CHAR(1) NOT NULL CHECK (semestre IN ('A','B')),
-    nombre_mes  VARCHAR(20) NOT NULL,
-    es_anio_nino BOOLEAN NOT NULL DEFAULT FALSE
+    id_tiempo       SERIAL PRIMARY KEY,
+    fecha           DATE NOT NULL UNIQUE,               -- primer día del mes
+    anio            SMALLINT NOT NULL,
+    mes             SMALLINT NOT NULL,
+    trimestre       SMALLINT NOT NULL,
+    semestre        CHAR(1) NOT NULL CHECK (semestre IN ('A','B')),
+    nombre_mes      VARCHAR(20) NOT NULL,
+    es_anio_nino    BOOLEAN NOT NULL DEFAULT FALSE,
+    es_cierre_anual BOOLEAN NOT NULL DEFAULT FALSE       -- Corrección 3.4.a
 );
 
 CREATE TABLE IF NOT EXISTS dim_cultivo (
@@ -107,9 +113,11 @@ CREATE TABLE IF NOT EXISTS fact_aptitud_suelo (
     UNIQUE (id_municipio, id_cultivo)
 );
 
+-- Corrección 3.5.a: FK id_tiempo en fact_censo_agropecuario
 CREATE TABLE IF NOT EXISTS fact_censo_agropecuario (
     id               SERIAL PRIMARY KEY,
     id_municipio     CHAR(5) NOT NULL REFERENCES dim_municipio(id_municipio),
+    id_tiempo        INT REFERENCES dim_tiempo(id_tiempo),
     anio_censo       SMALLINT NOT NULL,
     area_cultivos_permanentes_ha     DOUBLE PRECISION,
     area_cultivos_transitorios_ha    DOUBLE PRECISION,
@@ -175,59 +183,27 @@ CREATE TABLE IF NOT EXISTS pred_alerta_climatica (
     id_version       INT REFERENCES model_version(id_version)
 );
 
-ALTER TABLE fact_alerta_enso
-    ADD COLUMN IF NOT EXISTS fuente_origen VARCHAR(100);
-
-ALTER TABLE fact_alerta_enso
-    ADD COLUMN IF NOT EXISTS es_sintetico BOOLEAN NOT NULL DEFAULT FALSE;
-
-ALTER TABLE fact_precios_insumos
-    ADD COLUMN IF NOT EXISTS fuente_origen VARCHAR(100);
-
-ALTER TABLE fact_precios_insumos
-    ADD COLUMN IF NOT EXISTS es_sintetico BOOLEAN NOT NULL DEFAULT FALSE;
-
-ALTER TABLE fact_precios_insumos
-    DROP CONSTRAINT IF EXISTS fact_precios_insumos_id_tiempo_tipo_insumo_nombre_insumo_key;
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'fact_precios_insumos_unique_region'
-    ) THEN
-        ALTER TABLE fact_precios_insumos
-            ADD CONSTRAINT fact_precios_insumos_unique_region
-            UNIQUE (id_tiempo, tipo_insumo, nombre_insumo, id_region);
-    END IF;
-END $$;
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'pred_rendimiento_unique_natural_key'
-    ) THEN
-        ALTER TABLE pred_rendimiento
-            ADD CONSTRAINT pred_rendimiento_unique_natural_key
-            UNIQUE (id_municipio, id_cultivo, id_tiempo);
-    END IF;
-END $$;
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'pred_alerta_climatica_unique_natural_key'
-    ) THEN
-        ALTER TABLE pred_alerta_climatica
-            ADD CONSTRAINT pred_alerta_climatica_unique_natural_key
-            UNIQUE (id_municipio, id_tiempo);
-    END IF;
-END $$;
+-- Corrección 3.5.b: Índices en columnas FK de tablas de hechos
+-- PostgreSQL no los crea automáticamente
+CREATE INDEX IF NOT EXISTS idx_fact_clima_id_tiempo
+    ON fact_clima_mensual(id_tiempo);
+CREATE INDEX IF NOT EXISTS idx_fact_clima_id_municipio
+    ON fact_clima_mensual(id_municipio);
+CREATE INDEX IF NOT EXISTS idx_fact_prod_id_tiempo
+    ON fact_produccion_agricola(id_tiempo);
+CREATE INDEX IF NOT EXISTS idx_fact_prod_id_municipio
+    ON fact_produccion_agricola(id_municipio);
+CREATE INDEX IF NOT EXISTS idx_fact_prod_id_cultivo
+    ON fact_produccion_agricola(id_cultivo);
+CREATE INDEX IF NOT EXISTS idx_fact_precios_id_tiempo
+    ON fact_precios_mayoristas(id_tiempo);
+CREATE INDEX IF NOT EXISTS idx_fact_precios_id_central
+    ON fact_precios_mayoristas(id_central);
+CREATE INDEX IF NOT EXISTS idx_fact_precios_id_cultivo
+    ON fact_precios_mayoristas(id_cultivo);
+-- Índice compuesto para las vistas Power BI (municipio + tiempo)
+CREATE INDEX IF NOT EXISTS idx_fact_clima_mun_tiempo
+    ON fact_clima_mensual(id_municipio, id_tiempo);
 
 -- ── CAPA 4: VISTAS POWER BI ────────────────────
 

@@ -187,7 +187,7 @@ def run_extended_etl(engine=None):
         from extract.extract_sipra import extract_sipra
         from clean.clean_precios import normalizar_precios_sipsa, construir_dim_centrales
         from clean.clean_suelo import resumir_aptitud_suelo_por_municipio
-        from load.load_dimensions import load_dim_central_abastos, load_dim_region_natural, load_dim_tiempo
+        from load.load_dimensions import load_dim_central_abastos, load_dim_region_natural, load_dim_tiempo, update_dim_tiempo_with_oni
         from load.load_facts import (
             load_fact_alerta_enso, load_fact_precios_mayoristas,
             load_fact_aptitud_suelo, load_fact_censo_agropecuario,
@@ -209,6 +209,8 @@ def run_extended_etl(engine=None):
         df_boletines = extract_noaa_enso()
         if not df_boletines.empty and engine is not None:
             load_fact_alerta_enso(engine, df_boletines)
+            # Corrección 3.3.a: Actualizar dim_tiempo con años Niño reales
+            update_dim_tiempo_with_oni(engine)
 
         # Insumos (Usando el extractor robusto con datos sintéticos)
         progress.update(task, description="[magenta]Actualizando Precios de Insumos (IPIA)...")
@@ -293,7 +295,7 @@ def run_models(engine=None):
 def run_etl(mode: str = "all"):
     print_banner()
     from load.db import get_engine
-    engine = get_engine()
+    engine = get_engine(fail_silently=True)
     
     if mode in {"core", "all"}:
         run_core_etl(engine=engine)

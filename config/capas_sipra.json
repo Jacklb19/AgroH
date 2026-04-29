@@ -1,0 +1,107 @@
+[
+  {
+    "nombre": "aptitud_arroz",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_arroz_secano",
+    "anio_version": null,
+    "producto": "arroz"
+  },
+  {
+    "nombre": "aptitud_cafe",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "Aptitud_Cafe_Jul2022",
+    "anio_version": 2022,
+    "producto": "cafe"
+  },
+  {
+    "nombre": "aptitud_cacao",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_cacao_diciembre_2019",
+    "anio_version": 2019,
+    "producto": "cacao"
+  },
+  {
+    "nombre": "aptitud_papa",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_papa_sem_1_Dic2019",
+    "anio_version": 2019,
+    "producto": "papa"
+  },
+  {
+    "nombre": "aptitud_maiz",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "Aptitud_Maiz_Tradicional",
+    "anio_version": null,
+    "producto": "maiz"
+  },
+  {
+    "nombre": "aptitud_platano",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_platano",
+    "anio_version": null,
+    "producto": "platano"
+  },
+  {
+    "nombre": "aptitud_aguacate",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_aguacate_hass_Dic2019",
+    "anio_version": 2019,
+    "producto": "aguacate"
+  },
+  {
+    "nombre": "aptitud_yuca",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_yuca",
+    "anio_version": null,
+    "producto": "yuca"
+  },
+  {
+    "nombre": "aptitud_cebolla",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_cebolla_bulbo_sem_1_Dic2019",
+    "anio_version": 2019,
+    "producto": "cebolla"
+  },
+  {
+    "nombre": "aptitud_algodon",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_algodon_sem_1_Jun2020",
+    "anio_version": 2020,
+    "producto": "algodon"
+  },
+  {
+    "nombre": "aptitud_banano",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_banano",
+    "anio_version": null,
+    "producto": "banano"
+  },
+  {
+    "nombre": "aptitud_mango",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_mango_diciembre_2019",
+    "anio_version": 2019,
+    "producto": "mango"
+  },
+  {
+    "nombre": "aptitud_pina",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_pina",
+    "anio_version": null,
+    "producto": "pina"
+  },
+  {
+    "nombre": "aptitud_caucho",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_caucho_diciembre_2019",
+    "anio_version": 2019,
+    "producto": "caucho"
+  },
+  {
+    "nombre": "aptitud_palma",
+    "url_base": "https://geoservicios.upra.gov.co/arcgis/rest/services/aptitud_uso_suelo/{layer}/MapServer/0/query",
+    "layer": "aptitud_palma_2018",
+    "anio_version": 2018,
+    "producto": "palma de aceite"
+  }
+]

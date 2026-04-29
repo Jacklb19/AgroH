@@ -32,7 +32,8 @@ def build_ml_features(engine=None):
             dt.anio,
             fp.id_cultivo,
             fp.rendimiento_t_ha,
-            fp.area_sembrada_ha
+            fp.area_sembrada_ha,
+            fp.area_cosechada_ha
         FROM fact_produccion_agricola fp
         JOIN dim_tiempo dt ON dt.id_tiempo = fp.id_tiempo
     )
@@ -42,6 +43,7 @@ def build_ml_features(engine=None):
         p.anio,
         p.id_cultivo,
         p.area_sembrada_ha,
+        p.area_cosechada_ha,
         p.rendimiento_t_ha,
         c.lluvia_acumulada_anual,
         c.temp_promedio_anual,

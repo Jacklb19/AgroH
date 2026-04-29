@@ -1,4 +1,12 @@
-"""config/settings.py — Configuración central del pipeline AgroIA."""
+"""
+config/settings.py — Configuración central del pipeline AgroIA.
+
+Correcciones aplicadas:
+  - Corrección 3.2.a (2026-04-29): CLIMA_YEAR_START derivado de YEAR_START
+    con validación cruzada.
+  - Corrección 3.2.b (2026-04-29): SPATIAL_JOIN_RADIUS_KM configurable por
+    región natural con SPATIAL_JOIN_FALLBACK_NO_LIMIT.
+"""
 
 import logging
 import os
@@ -18,11 +26,12 @@ DATA_RAW        = BASE_DIR / "data" / "raw"
 DATA_PROCESSED  = BASE_DIR / "data" / "processed"
 LOGS_DIR        = BASE_DIR / "logs"
 MANUAL_DATA_DIR = DATA_RAW / "manual"
+MODELS_DIR      = BASE_DIR / "models"
 
 
 def ensure_dirs() -> None:
     """Crea carpetas base si no existen."""
-    for d in [DATA_RAW, DATA_PROCESSED, LOGS_DIR, MANUAL_DATA_DIR]:
+    for d in [DATA_RAW, DATA_PROCESSED, LOGS_DIR, MANUAL_DATA_DIR, MODELS_DIR]:
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -82,14 +91,37 @@ if _year_end_env:
 else:
     YEAR_END = _anio_actual
 
-CLIMA_YEAR_START = 2018
+# Corrección 3.2.a: CLIMA_YEAR_START derivado de YEAR_START
+CLIMA_YEAR_START = int(os.getenv(
+    "CLIMA_YEAR_START",
+    str(max(YEAR_START, 2010))  # IDEAM no tiene datos confiables antes de 2010
+))
+if CLIMA_YEAR_START < YEAR_START:
+    logger.warning(
+        "CLIMA_YEAR_START (%s) es anterior a YEAR_START (%s). "
+        "El clima tendrá más cobertura temporal que los datos de producción.",
+        CLIMA_YEAR_START, YEAR_START
+    )
 if CLIMA_YEAR_START > YEAR_END:
     logger.warning("settings: CLIMA_YEAR_START > YEAR_END (%s > %s)", CLIMA_YEAR_START, YEAR_END)
 
 
 # --- EXTRACCIÓN ---
 IDEAM_CHUNK_DAYS       = 10  # reducir si hay timeouts en Socrata IDEAM
-SPATIAL_JOIN_RADIUS_KM = 50  # radio join estación ↔ municipio (km)
+
+# Corrección 3.2.b: SPATIAL_JOIN_RADIUS_KM configurable por región natural
+SPATIAL_JOIN_RADIUS_KM = {
+    "andina": int(os.getenv("RADIUS_ANDINA_KM", "50")),
+    "caribe": int(os.getenv("RADIUS_CARIBE_KM", "80")),
+    "pacifico": int(os.getenv("RADIUS_PACIFICO_KM", "80")),
+    "orinoquia": int(os.getenv("RADIUS_ORINOQUIA_KM", "200")),
+    "amazonia": int(os.getenv("RADIUS_AMAZONIA_KM", "300")),
+    "default": int(os.getenv("RADIUS_DEFAULT_KM", "100")),
+}
+SPATIAL_JOIN_FALLBACK_NO_LIMIT = True  # Si no hay estación en radio, usar la más cercana sin límite
+
+# Mes de cierre de campaña agrícola (para vinculación de datos anuales con dim_tiempo)
+MES_CIERRE_CAMPANA = int(os.getenv("MES_CIERRE_CAMPANA", "12"))
 
 
 # --- DOMINIO ---
