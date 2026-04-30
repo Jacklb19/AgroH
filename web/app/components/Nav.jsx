@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { Icon } from "./icons";
 
 const LINKS = [
@@ -10,6 +11,13 @@ const LINKS = [
 ];
 
 export default function Nav({ active, onNav }) {
+  const [open, setOpen] = useState(false);
+
+  const navigate = (id) => {
+    onNav(id);
+    setOpen(false);
+  };
+
   return (
     <header className="nav">
       <div className="container nav-inner">
@@ -20,6 +28,7 @@ export default function Nav({ active, onNav }) {
             <span>Inteligencia Agro-Climática</span>
           </div>
         </div>
+
         <nav className="nav-links">
           {LINKS.map((l) => (
             <button
@@ -31,10 +40,38 @@ export default function Nav({ active, onNav }) {
             </button>
           ))}
         </nav>
+
         <button className="nav-cta" onClick={() => onNav("prediccion")}>
           Consultar Predicción <Icon.arrow className="arrow" />
         </button>
+
+        <button
+          className={`nav-hamburger ${open ? "open" : ""}`}
+          onClick={() => setOpen(!open)}
+          aria-label="Menú"
+        >
+          <span />
+          <span />
+          <span />
+        </button>
       </div>
+
+      {open && (
+        <div className="nav-mobile">
+          {LINKS.map((l) => (
+            <button
+              key={l.id}
+              className={`nav-mobile-link ${active === l.id ? "active" : ""}`}
+              onClick={() => navigate(l.id)}
+            >
+              {l.label}
+            </button>
+          ))}
+          <button className="nav-mobile-cta" onClick={() => navigate("prediccion")}>
+            Consultar Predicción
+          </button>
+        </div>
+      )}
     </header>
   );
 }
