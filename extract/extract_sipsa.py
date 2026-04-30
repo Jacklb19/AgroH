@@ -223,6 +223,11 @@ def extract_sipsa() -> pd.DataFrame:
         df_flat = pd.DataFrame(records)
 
         if not df_flat.empty:
+            # Corrección: Asegurar que las columnas numéricas sean float para evitar errores con 'n.d.'
+            for col in ['precio_min_cop_kg', 'precio_max_cop_kg', 'precio_promedio_cop_kg']:
+                if col in df_flat.columns:
+                    df_flat[col] = pd.to_numeric(df_flat[col], errors='coerce')
+            
             df_flat.to_csv(out_file, index=False)
             logger.info("SIPSA: %s registros extraídos -> %s", len(df_flat), out_file)
             # Guardar cache de último éxito (Corrección 1.4)

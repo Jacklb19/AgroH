@@ -66,7 +66,7 @@ def load_all_facts(engine, df_produccion: pd.DataFrame):
         logger.warning("FACT_PRODUCCION: El cruce con dimensiones resultó en 0 filas.")
         return
 
-    # 3. Preparar DataFrame final
+    # 3. Preparar DataFrame final y aplicar reglas de calidad
     df_fact = pd.DataFrame({
         "id_municipio": df_merged["id_municipio"],
         "id_cultivo": df_merged["id_cultivo"],
@@ -77,6 +77,12 @@ def load_all_facts(engine, df_produccion: pd.DataFrame):
         "rendimiento_t_ha": pd.to_numeric(df_merged["rendimiento_t_ha"], errors="coerce").fillna(0),
         "fuente_origen": "MinAgricultura EVA"
     })
+
+    # Regla de calidad: area_cosechada no puede ser mayor a area_sembrada
+    df_fact["area_cosechada_ha"] = np.minimum(df_fact["area_cosechada_ha"], df_fact["area_sembrada_ha"])
+
+    # Regla de calidad: rendimiento en rangos biológicos lógicos [0, 150]
+    df_fact["rendimiento_t_ha"] = df_fact["rendimiento_t_ha"].clip(0, 150)
 
     # Limpiar nulos críticos y agrupar
     df_fact = df_fact.dropna(subset=["id_municipio", "id_cultivo", "id_tiempo"])
@@ -322,20 +328,18 @@ def load_fact_precios_insumos(engine, df_insumos: pd.DataFrame):
     """
     if df_insumos is None or df_insumos.empty: return
 
-    logger.info("FACT_INSUMOS: Cargando %s registros...", len(df_insumos))
+    logger.info("FACT_INSUMOS: Cargando %s registros. Columnas: %s", len(df_insumos), df_insumos.columns.tolist())
 
     dim_tiempo_db = _safe_read_sql("SELECT id_tiempo, anio, mes FROM dim_tiempo", engine)
     # Para insumos, usamos el ID de la nación (00000) o región si está disponible. 
     # Por defecto vinculamos a ID_REGION 1 (Nacional) si no hay detalle.
     
     df = df_insumos.copy()
-    if "fecha" in df.columns:
-        df["anio"] = df["fecha"].dt.year
-        df["mes"] = df["fecha"].dt.month
-        df = df.merge(dim_tiempo_db, on=["anio", "mes"], how="inner")
     
+    # Asegurar id_region (1 = Nacional por defecto)
     if "id_region" not in df.columns:
-        df["id_region"] = 1 # Nacional
+        df["id_region"] = 1
+    df["id_region"] = df["id_region"].fillna(1)
     
     # Filtrar reales
     if "es_sintetico" in df.columns:
@@ -348,5 +352,6 @@ def load_fact_precios_insumos(engine, df_insumos: pd.DataFrame):
     cols = ["id_tiempo", "tipo_insumo", "nombre_insumo", "id_region", "precio_cop_unidad"]
     df_fact = df[[c for c in cols if c in df.columns]].dropna(subset=["id_tiempo", "id_region"])
     
+    logger.info("FACT_INSUMOS: %s registros listos para upsert", len(df_fact))
     upsert(engine, "fact_precios_insumos", df_fact, ["id_tiempo", "tipo_insumo", "nombre_insumo", "id_region"])
 

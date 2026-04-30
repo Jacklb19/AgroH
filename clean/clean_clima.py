@@ -45,10 +45,18 @@ def _normalizar_tipo_sensor(descripcion: str) -> str:
         return "temperatura_media_c"
     if "humedad del aire" in s or "hum relativa" in s or "relativa" in s:
         return "humedad_relativa_pct"
-    if "brill" in s or "solar" in s or "radia" in s:
-        return "brillo_solar_horas_dia"
     if "precipit" in s:
         return "precipitacion_mm"
+    if "viento" in s and "veloc" in s:
+        return "viento_velocidad_ms"
+    if "viento" in s and "direc" in s:
+        return "viento_direccion_deg"
+    if "presion" in s:
+        return "presion_atmosferica_hpa"
+    if "nivel" in s:
+        return "nivel_agua_m"
+    if "brill" in s or "solar" in s or "radia" in s:
+        return "brillo_solar_horas_dia"
         
     return "sensor_desconocido"
 

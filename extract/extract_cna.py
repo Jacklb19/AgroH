@@ -51,21 +51,29 @@ def _detectar_columnas_cultivo(df: pd.DataFrame) -> dict:
 
     # Si no se detectaron por nombre, intentar por posición relativa a "agricola" si se encuentra
     if result["permanentes"] is None or result["transitorios"] is None:
-        for row_idx in range(min(30, len(df))):
+        for row_idx in range(min(40, len(df))):
             for col_idx in range(len(df.columns)):
                 val = df.iloc[row_idx, col_idx]
                 if pd.isna(val): continue
                 cell = str(val).lower()
-                if "agricola" in cell and "area" in cell:
-                    # En algunos anexos, permanentes está a la derecha de agricola
+                if "agricola" in cell:
+                    # En algunos anexos, los nombres están en la fila de abajo
+                    if row_idx + 1 < len(df):
+                        for sub_col in range(col_idx, min(col_idx + 5, len(df.columns))):
+                            sub_val = str(df.iloc[row_idx + 1, sub_col]).lower()
+                            if "perm" in sub_val and result["permanentes"] is None:
+                                result["permanentes"] = sub_col
+                                logger.info("CNA: Detectada col permanentes por sub-header en (%s, %s)", row_idx+1, sub_col)
+                            if "trans" in sub_val and result["transitorios"] is None:
+                                result["transitorios"] = sub_col
+                                logger.info("CNA: Detectada col transitorios por sub-header en (%s, %s)", row_idx+1, sub_col)
+                    
+                    # Si aún no, usar posición fija relativa (CNA Cuadro 1 estándar)
                     if result["permanentes"] is None and col_idx + 1 < len(df.columns):
                         result["permanentes"] = col_idx + 1
-                        logger.info("CNA: Asumiendo permanentes en col %s (derecha de 'agricola')", col_idx + 1)
                     if result["transitorios"] is None and col_idx + 2 < len(df.columns):
                         result["transitorios"] = col_idx + 2
-                        logger.info("CNA: Asumiendo transitorios en col %s (derecha de 'agricola')", col_idx + 2)
                     break
-
     return result
 
 
