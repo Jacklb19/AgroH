@@ -118,7 +118,7 @@ def load_fact_clima_mensual(engine, df_clima_mensual: pd.DataFrame):
 
     metric_cols = [
         "precipitacion_mm", "temperatura_media_c", "temperatura_max_c",
-        "temperatura_min_c", "humedad_relativa_pct", "brillo_solar_horas_dia"
+        "temperatura_min_c", "humedad_relativa_pct"
     ]
 
     for c in metric_cols:
@@ -264,7 +264,7 @@ def load_fact_precios_mayoristas(engine, df_precios: pd.DataFrame):
     df = df.merge(dim_central_db, on=["nombre_central", "ciudad"], how="inner")
 
     cols = ["id_central", "id_cultivo", "id_tiempo", "precio_min_cop_kg",
-            "precio_max_cop_kg", "precio_promedio_cop_kg", "volumen_abastecimiento_ton"]
+            "precio_max_cop_kg", "precio_promedio_cop_kg"]
 
     df_fact = df[[c for c in cols if c in df.columns]].copy()
     upsert(engine, "fact_precios_mayoristas", df_fact, ["id_central", "id_cultivo", "id_tiempo"])

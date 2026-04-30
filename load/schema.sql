@@ -89,7 +89,6 @@ CREATE TABLE IF NOT EXISTS fact_clima_mensual (
     temperatura_max_c          DOUBLE PRECISION,
     temperatura_min_c          DOUBLE PRECISION,
     humedad_relativa_pct       DOUBLE PRECISION,
-    brillo_solar_horas_dia     DOUBLE PRECISION,
     UNIQUE (id_estacion, id_tiempo)
 );
 
@@ -101,7 +100,6 @@ CREATE TABLE IF NOT EXISTS fact_precios_mayoristas (
     precio_min_cop_kg        DOUBLE PRECISION,
     precio_max_cop_kg        DOUBLE PRECISION,
     precio_promedio_cop_kg   DOUBLE PRECISION,
-    volumen_abastecimiento_ton DOUBLE PRECISION,
     UNIQUE (id_central, id_cultivo, id_tiempo)
 );
 
@@ -121,6 +119,7 @@ CREATE TABLE IF NOT EXISTS fact_censo_agropecuario (
     anio_censo       SMALLINT NOT NULL,
     area_cultivos_permanentes_ha     DOUBLE PRECISION,
     area_cultivos_transitorios_ha    DOUBLE PRECISION,
+    area_agropecuaria_ha             DOUBLE PRECISION,
     UNIQUE (id_municipio, anio_censo)
 );
 
@@ -130,9 +129,6 @@ CREATE TABLE IF NOT EXISTS fact_alerta_enso (
     id_region        INT  NOT NULL REFERENCES dim_region_natural(id_region),
     fase_enso        VARCHAR(20), -- El Niño, La Niña, Neutro
     indice_oni       DOUBLE PRECISION,
-    anomalia_precipitacion_pct DOUBLE PRECISION,
-    probabilidad_deficit_hidrico DOUBLE PRECISION,
-    probabilidad_exceso_hidrico  DOUBLE PRECISION,
     fuente_origen    VARCHAR(100),
     es_sintetico     BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE (id_tiempo, id_region)
@@ -144,9 +140,7 @@ CREATE TABLE IF NOT EXISTS fact_precios_insumos (
     tipo_insumo      VARCHAR(50),
     nombre_insumo    VARCHAR(100),
     precio_cop_unidad DOUBLE PRECISION,
-    unidad_medida    VARCHAR(20),
     id_region        INT REFERENCES dim_region_natural(id_region),
-    fuente_origen    VARCHAR(100),
     es_sintetico     BOOLEAN NOT NULL DEFAULT FALSE
 );
 
