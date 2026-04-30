@@ -158,10 +158,12 @@ def _fetch_layer(url: str, cultivo: str) -> pd.DataFrame:
 def extract_sipra() -> pd.DataFrame:
     """
     Descarga la aptitud de suelo por municipio directamente desde la API REST de ArcGIS de la UPRA.
-
-    Corrección 1.2: Capas leídas desde config/capas_sipra.json.
-    Consulta catálogo dinámico de UPRA para buscar versiones más recientes.
     """
+    out_file = DATA_RAW / "sipra" / "sipra_aptitud_raw.parquet"
+    if out_file.exists():
+        logger.info("SIPRA: Archivo consolidado ya existe. Saltando descarga dinámica.")
+        return pd.read_parquet(out_file)
+
     logger.info("SIPRA: iniciando extracción desde UPRA ArcGIS...")
 
     # Cargar configuración desde archivo externo

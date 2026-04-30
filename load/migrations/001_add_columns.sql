@@ -54,6 +54,16 @@ ALTER TABLE dim_tiempo ADD COLUMN IF NOT EXISTS es_cierre_anual BOOLEAN NOT NULL
 -- Columna id_tiempo FK en fact_censo_agropecuario (si no existe ya)
 ALTER TABLE fact_censo_agropecuario ADD COLUMN IF NOT EXISTS id_tiempo INT REFERENCES dim_tiempo(id_tiempo);
 
+-- Corrección: Restricción de unicidad para permitir ON CONFLICT en el loader
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fact_censo_agropecuario_mun_tiempo_key'
+    ) THEN
+        ALTER TABLE fact_censo_agropecuario ADD CONSTRAINT fact_censo_agropecuario_mun_tiempo_key UNIQUE (id_municipio, id_tiempo);
+    END IF;
+END $$;
+
 -- Registrar migración
 INSERT INTO schema_migrations(version, description)
 VALUES (1, 'Constraints, es_cierre_anual, id_tiempo FK en CNA') ON CONFLICT DO NOTHING;

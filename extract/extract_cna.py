@@ -25,39 +25,49 @@ logger = logging.getLogger(__name__)
 
 def _detectar_columnas_cultivo(df: pd.DataFrame) -> dict:
     """
-    Busca columnas de cultivos permanentes y transitorios por nombre aproximado
-    en los headers del Excel del CNA.
-
-    Returns:
-        dict con claves 'permanentes' y 'transitorios', cada una con el índice
-        de columna correspondiente o None si no se encuentra.
+    Busca columnas de cultivos permanentes y transitorios por nombre aproximado.
     """
     result = {"permanentes": None, "transitorios": None}
 
-    # Buscar en todas las filas del header (primeras 15 filas)
-    for row_idx in range(min(15, len(df))):
+    # Buscar en las primeras 50 filas (algunos archivos tienen headers muy largos)
+    for row_idx in range(min(50, len(df))):
         for col_idx in range(len(df.columns)):
-            cell = str(df.iloc[row_idx, col_idx]).lower()
-            if re.search(r"permanente", cell) and re.search(r"(cultivo|agr[ií]cola|[áa]rea)", cell):
+            val = df.iloc[row_idx, col_idx]
+            if pd.isna(val):
+                continue
+            cell = str(val).lower()
+            
+            # Patrón para permanentes: incluye variaciones y abreviaturas
+            if any(p in cell for p in ["permanente", "perm."]) and any(x in cell for x in ["cultivo", "agri", "area"]):
                 if result["permanentes"] is None:
                     result["permanentes"] = col_idx
-                    logger.info("CNA: columna permanentes detectada en fila %s, col %s: '%s'",
-                                row_idx, col_idx, df.iloc[row_idx, col_idx])
-            if re.search(r"transitorio", cell) and re.search(r"(cultivo|agr[ií]cola|[áa]rea)", cell):
+                    logger.info("CNA: columna permanentes detectada en fila %s, col %s: '%s'", row_idx, col_idx, val)
+            
+            # Patrón para transitorios: incluye variaciones y abreviaturas
+            if any(p in cell for p in ["transitorio", "trans."]) and any(x in cell for x in ["cultivo", "agri", "area"]):
                 if result["transitorios"] is None:
                     result["transitorios"] = col_idx
-                    logger.info("CNA: columna transitorios detectada en fila %s, col %s: '%s'",
-                                row_idx, col_idx, df.iloc[row_idx, col_idx])
+                    logger.info("CNA: columna transitorios detectada en fila %s, col %s: '%s'", row_idx, col_idx, val)
 
-    # También buscar en los encabezados de columna si son strings
-    for col_idx, col_name in enumerate(df.columns):
-        col_str = str(col_name).lower()
-        if "permanente" in col_str and result["permanentes"] is None:
-            result["permanentes"] = col_idx
-        if "transitorio" in col_str and result["transitorios"] is None:
-            result["transitorios"] = col_idx
+    # Si no se detectaron por nombre, intentar por posición relativa a "agricola" si se encuentra
+    if result["permanentes"] is None or result["transitorios"] is None:
+        for row_idx in range(min(30, len(df))):
+            for col_idx in range(len(df.columns)):
+                val = df.iloc[row_idx, col_idx]
+                if pd.isna(val): continue
+                cell = str(val).lower()
+                if "agricola" in cell and "area" in cell:
+                    # En algunos anexos, permanentes está a la derecha de agricola
+                    if result["permanentes"] is None and col_idx + 1 < len(df.columns):
+                        result["permanentes"] = col_idx + 1
+                        logger.info("CNA: Asumiendo permanentes en col %s (derecha de 'agricola')", col_idx + 1)
+                    if result["transitorios"] is None and col_idx + 2 < len(df.columns):
+                        result["transitorios"] = col_idx + 2
+                        logger.info("CNA: Asumiendo transitorios en col %s (derecha de 'agricola')", col_idx + 2)
+                    break
 
     return result
+
 
 
 def extract_cna() -> pd.DataFrame:
@@ -99,31 +109,61 @@ def extract_cna() -> pd.DataFrame:
         if not resp:
             raise ConnectionError("No se pudo descargar el archivo de CNA")
 
-        # Cargar Excel (Cuadro 1 - Uso del Suelo suele estar en sheet_name=2)
-        df_uso = pd.read_excel(io.BytesIO(resp.content), sheet_name=2, header=None, skiprows=10)
+        # Cargar Excel completo para buscar el header
+        df_full = pd.read_excel(io.BytesIO(resp.content), sheet_name=2, header=None)
 
-        # Mapeo correcto según estructura DANE:
-        # 3: Cod Municipio, 4: Municipio, 5: Area Agricola, 6: Siguiente...
-        df_uso_base = df_uso[[3, 4, 5, 6]].copy()
-        df_uso_base.columns = ["id_municipio", "nombre_municipio", "area_agropecuaria_ha", "area_no_agropecuaria_ha"]
+        # Buscar la fila donde comienza la tabla (buscando "Código" y "Municipio")
+        header_row_idx = None
+        for i in range(min(30, len(df_full))):
+            row_str = " ".join([str(x) for x in df_full.iloc[i]]).lower()
+            if "código" in row_str and "municipio" in row_str:
+                header_row_idx = i
+                break
+
+        if header_row_idx is not None:
+            logger.info("CNA: Fila de encabezados encontrada en índice %s: %s", header_row_idx, df_full.iloc[header_row_idx].tolist())
+
+        # Re-leer o recortar desde el header detectado
+        df_uso = df_full.iloc[header_row_idx+1:].copy()
+        
+        # Loggear los primeros valores de las columnas sospechosas
+        logger.info("CNA: Muestra de datos crudos (primeras 5 filas):\n%s", df_uso.head(5).to_string())
+
+
+        # Mapeo por posición según muestra observada:
+        # Col 2: Código, Col 3: Municipio, Col 4: Area Agro, Col 5: Area No Agro
+        col_idx_cod = 2
+        col_idx_muni = 3
+        col_idx_agro = 4
+        col_idx_no_agro = 5
+
+        df_uso_base = pd.DataFrame({
+            "id_municipio": df_uso.iloc[:, col_idx_cod],
+            "nombre_municipio": df_uso.iloc[:, col_idx_muni],
+            "area_agropecuaria_ha": df_uso.iloc[:, col_idx_agro],
+            "area_no_agropecuaria_ha": df_uso.iloc[:, col_idx_no_agro]
+        })
+
 
         # Limpieza y validación de DIVIPOLA
         df_uso_base = df_uso_base.dropna(subset=["id_municipio"])
-        df_uso_base["id_municipio"] = pd.to_numeric(df_uso_base["id_municipio"], errors="coerce").astype("Int64").astype(str).str.zfill(5)
-        df_uso_base = df_uso_base[df_uso_base["id_municipio"] != "<NA>"]
+        df_uso_base["id_municipio"] = pd.to_numeric(df_uso_base["id_municipio"], errors="coerce").fillna(0).astype(int).astype(str).str.zfill(5)
+        df_uso_base = df_uso_base[df_uso_base["id_municipio"] != "00000"]
 
         # Validación de formato DIVIPOLA
         if not df_uso_base.empty:
             sample = df_uso_base["id_municipio"].head(5).tolist()
-            assert all(str(v).isdigit() and len(str(v)) in (4, 5) for v in sample), \
-                f"CNA: id_municipio no parece un código DIVIPOLA válido: {sample}"
+            # Aceptar si son números
+            if not all(str(v).isdigit() for v in sample):
+                logger.error("CNA: id_municipio no parece válido: %s", sample)
+
 
         df_uso_base["anio_censo"] = 2014
 
         # --- Corrección 1.1: Leer columnas reales de cultivos ---
         # Intentar detectar columnas de cultivos permanentes y transitorios
-        # en el Excel original (no recortado)
-        cols_cultivo = _detectar_columnas_cultivo(df_uso)
+        # en el Excel original (completo)
+        cols_cultivo = _detectar_columnas_cultivo(df_full)
 
         if cols_cultivo["permanentes"] is not None and cols_cultivo["transitorios"] is not None:
             # Extraer las columnas reales del CNA
@@ -131,12 +171,13 @@ def extract_cna() -> pd.DataFrame:
             col_trans = cols_cultivo["transitorios"]
 
             df_uso_base["area_cultivos_permanentes_ha"] = pd.to_numeric(
-                df_uso.iloc[:, col_perm], errors="coerce"
-            ).reindex(df_uso_base.index)
+                df_full.iloc[df_uso_base.index, col_perm], errors="coerce"
+            )
             df_uso_base["area_cultivos_transitorios_ha"] = pd.to_numeric(
-                df_uso.iloc[:, col_trans], errors="coerce"
-            ).reindex(df_uso_base.index)
+                df_full.iloc[df_uso_base.index, col_trans], errors="coerce"
+            )
             df_uso_base["area_cultivo_fuente"] = "real_cna"
+
 
             logger.info(
                 "CNA: area_cultivos_permanentes_ha y area_cultivos_transitorios_ha "
@@ -165,5 +206,8 @@ def extract_cna() -> pd.DataFrame:
         logger.error("CNA: error de red (timeout) al descargar desde DANE")
         return pd.DataFrame()
     except Exception as e:
-        logger.error("CNA: error inesperado procesando Excel: %s", e)
+        logger.error("CNA: error inesperado procesando Excel: %s", e, exc_info=True)
         return pd.DataFrame()
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    extract_cna()

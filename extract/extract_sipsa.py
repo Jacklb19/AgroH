@@ -176,25 +176,36 @@ def extract_sipsa() -> pd.DataFrame:
         idx_ciudades = _find_ciudades_row(df_raw, idx_fecha)
 
         ciudades = {}
-        for col in range(1, len(df_raw.columns)):
+        # Mapeo: {col_promedio: {'ciudad': name, 'col_min': idx, 'col_max': idx}}
+        
+        # En el boletín diario del DANE, las ciudades suelen ser celdas combinadas de 3 columnas
+        # Col A: Producto | Col B: Min, Col C: Max, Col D: Prom (para Ciudad 1)
+        for col in range(1, len(df_raw.columns), 3):
             ciudad = str(df_raw.iloc[idx_ciudades, col]).strip()
             if ciudad not in ('nan', '', 'None'):
-                ciudades[col] = ciudad
+                # Asumimos el patrón: Min, Max, Promedio en columnas consecutivas
+                ciudades[col + 2] = {
+                    'nombre': ciudad,
+                    'col_min': col,
+                    'col_max': col + 1
+                }
 
         records = []
-        # Los datos empiezan después de la fila de ciudades
-        for idx in range(idx_ciudades + 1, len(df_raw)):
+        for idx in range(idx_ciudades + 2, len(df_raw)):
             producto = str(df_raw.iloc[idx, 0]).strip()
             if pd.isna(df_raw.iloc[idx, 1]) or producto in ('nan', '', 'None') or 'Fuente:' in producto:
                 continue
 
-            for col, ciudad in ciudades.items():
-                if col >= len(df_raw.columns): continue
-                precio = df_raw.iloc[idx, col]
-                if pd.notna(precio) and str(precio).strip().lower() not in ('n.d.', 'nan', ''):
-                    # Limpiar caracteres
+            for col_prom, info in ciudades.items():
+                if col_prom >= len(df_raw.columns): continue
+                
+                precio_prom = df_raw.iloc[idx, col_prom]
+                precio_min = df_raw.iloc[idx, info['col_min']]
+                precio_max = df_raw.iloc[idx, info['col_max']]
+                
+                if pd.notna(precio_prom) and str(precio_prom).strip().lower() not in ('n.d.', 'nan', ''):
                     prod_limpio = unicodedata.normalize("NFKD", producto).encode("ASCII", "ignore").decode("utf-8")
-                    ciu_limpia = unicodedata.normalize("NFKD", ciudad).encode("ASCII", "ignore").decode("utf-8")
+                    ciu_limpia = unicodedata.normalize("NFKD", info['nombre']).encode("ASCII", "ignore").decode("utf-8")
                     central_limpia = " ".join(ciu_limpia.replace("\r", " ").replace("\n", " ").split())
                     ciudad_base = central_limpia.split(',')[0].strip()
 
@@ -203,7 +214,9 @@ def extract_sipsa() -> pd.DataFrame:
                         'producto': prod_limpio,
                         'central': central_limpia,
                         'ciudad': ciudad_base,
-                        'precio_promedio_cop_kg': precio,
+                        'precio_min_cop_kg': precio_min,
+                        'precio_max_cop_kg': precio_max,
+                        'precio_promedio_cop_kg': precio_prom,
                         'fecha_archivo_sipsa': fecha_archivo,
                     })
 

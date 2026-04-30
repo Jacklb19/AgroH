@@ -86,7 +86,7 @@ def load_all_facts(engine, df_produccion: pd.DataFrame):
 
 def load_fact_clima_mensual(engine, df_clima_mensual: pd.DataFrame):
     """
-    Carga hechos climáticos mensuales.
+    Carga hechos climáticos mensuales con imputación espacial por cercanía.
     """
     if df_clima_mensual is None or df_clima_mensual.empty:
         return
@@ -94,46 +94,85 @@ def load_fact_clima_mensual(engine, df_clima_mensual: pd.DataFrame):
     logger.info("FACT_CLIMA: Procesando %s registros...", len(df_clima_mensual))
 
     dim_tiempo_db = _safe_read_sql("SELECT id_tiempo, anio, mes FROM dim_tiempo", engine)
-    dim_est_db = _safe_read_sql("SELECT id_estacion, id_municipio FROM dim_estacion_ideam WHERE id_municipio IS NOT NULL", engine)
+    dim_est_db = _safe_read_sql("SELECT id_estacion, id_municipio, latitud, longitud, altitud_msnm FROM dim_estacion_ideam", engine)
 
     if dim_tiempo_db.empty or dim_est_db.empty:
         logger.warning("FACT_CLIMA: Dimensiones incompletas para el cruce.")
         return
 
     df = df_clima_mensual.copy()
+    # Asegurar tipos para el cruce
     df["anio"] = pd.to_numeric(df["anio"], errors="coerce").fillna(0).astype(int)
     df["mes"] = pd.to_numeric(df["mes"], errors="coerce").fillna(0).astype(int)
-    df["id_estacion"] = df["id_estacion"].astype(str)
-    dim_est_db["id_estacion"] = dim_est_db["id_estacion"].astype(str)
-
+    dim_tiempo_db["anio"] = dim_tiempo_db["anio"].astype(int)
+    dim_tiempo_db["mes"] = dim_tiempo_db["mes"].astype(int)
+    
     df = df.merge(dim_tiempo_db, on=["anio", "mes"], how="inner")
     df = df.merge(dim_est_db, on="id_estacion", how="inner")
 
-    cols_fact = [
-        "id_estacion", "id_municipio", "id_tiempo",
+    metric_cols = [
         "precipitacion_mm", "temperatura_media_c", "temperatura_max_c",
         "temperatura_min_c", "humedad_relativa_pct", "brillo_solar_horas_dia"
     ]
 
-    # Asegurar columnas
-    for c in cols_fact:
+    for c in metric_cols:
         if c not in df.columns: df[c] = np.nan
 
+    # --- Imputación Espacial y Regional ---
+    crit_cols = ["temperatura_media_c", "temperatura_max_c", "temperatura_min_c", "humedad_relativa_pct"]
+    if any(df[c].isna().any() for c in crit_cols):
+        logger.info("FACT_CLIMA: Ejecutando imputación avanzada (Pisos térmicos + Regional)...")
+        
+        # Necesitamos el ID del departamento para el fallback regional
+        # Asumimos que los primeros 2 dígitos del id_municipio son el depto
+        df["id_depto"] = df["id_municipio"].astype(str).str.zfill(5).str[:2]
+
+        for col in crit_cols:
+            # 1. Imputación por Estación Cercana (con ajuste de altitud)
+            idx_nulos = df[df[col].isna()].index
+            if len(idx_nulos) == 0: continue
+            
+            df_valido = df[df[col].notna()][["id_tiempo", "latitud", "longitud", "altitud_msnm", "id_depto", col]]
+            
+            for idx in idx_nulos:
+                row = df.loc[idx]
+                mes_valido = df_valido[df_valido["id_tiempo"] == row["id_tiempo"]]
+                
+                if not mes_valido.empty:
+                    # Intento 1: Estación más cercana (3D)
+                    dist = ((mes_valido["latitud"] - row["latitud"])**2 + 
+                            (mes_valido["longitud"] - row["longitud"])**2 + 
+                            ((mes_valido["altitud_msnm"] - row["altitud_msnm"])/1000)**2)**0.5
+                    
+                    nearest_row = mes_valido.iloc[dist.argmin()]
+                    val = nearest_row[col]
+                    if "temperatura" in col:
+                        val -= (row["altitud_msnm"] - nearest_row["altitud_msnm"]) / 100.0 * 0.65
+                    df.at[idx, col] = val
+                else:
+                    # Intento 2: Fallback Regional (Promedio del mismo depto en ese mes)
+                    # Esto ayuda cuando toda una zona está sin sensores de temp
+                    pass # Implementado abajo con groupby para velocidad
+
+            # Fallback masivo por departamento si aún quedan nulos
+            if df[col].isna().any():
+                df[col] = df[col].fillna(df.groupby(["id_tiempo", "id_depto"])[col].transform("mean"))
+
+        logger.info("FACT_CLIMA: Imputación finalizada.")
+
+
+
+    cols_fact = ["id_estacion", "id_municipio", "id_tiempo"] + metric_cols
     df_fact = df[cols_fact].dropna(subset=["id_estacion", "id_municipio", "id_tiempo"])
-    metric_cols = [
-        "precipitacion_mm",
-        "temperatura_media_c",
-        "temperatura_max_c",
-        "temperatura_min_c",
-        "humedad_relativa_pct",
-        "brillo_solar_horas_dia",
-    ]
+    
     before = len(df_fact)
     df_fact = df_fact.dropna(subset=metric_cols, how="all")
     dropped = before - len(df_fact)
     if dropped:
-        logger.warning("FACT_CLIMA: %s filas sin metricas climaticas fueron omitidas.", dropped)
+        logger.warning("FACT_CLIMA: %s filas sin métricas climáticas tras imputación fueron omitidas.", dropped)
+    
     upsert(engine, "fact_clima_mensual", df_fact, ["id_estacion", "id_tiempo"])
+
 
 def load_fact_alerta_enso(engine, df_boletines: pd.DataFrame):
     """
@@ -257,43 +296,57 @@ def load_fact_aptitud_suelo(engine, df_suelo: pd.DataFrame):
     upsert(engine, "fact_aptitud_suelo", df_fact, ["id_municipio", "id_cultivo"])
 
 def load_fact_censo_agropecuario(engine, df_censo: pd.DataFrame):
-    """Carga hechos del CNA (DANE)."""
+    """Carga hechos del CNA (DANE) vinculados al calendario."""
     if df_censo is None or df_censo.empty: return
 
+    dim_tiempo_db = _safe_read_sql("SELECT id_tiempo, anio, mes FROM dim_tiempo WHERE anio=2014 AND mes=12", engine)
     dim_municipio_db = _safe_read_sql("SELECT id_municipio FROM dim_municipio", engine)
+    
     df = df_censo.copy()
     df["id_municipio"] = df["id_municipio"].astype(str).str.zfill(5)
-    df["anio_censo"] = 2014
+    df["anio"] = 2014
+    df["mes"] = 12
 
-    df_fact = df.merge(dim_municipio_db, on="id_municipio", how="inner")
-    cols = ["id_municipio", "anio_censo", "area_cultivos_permanentes_ha", "area_cultivos_transitorios_ha"]
-    df_fact = df_fact[[c for c in cols if c in df_fact.columns]]
+    df = df.merge(dim_tiempo_db, on=["anio", "mes"], how="inner")
+    df = df.merge(dim_municipio_db, on="id_municipio", how="inner")
+    
+    df["anio_censo"] = 2014
+    cols = ["id_municipio", "id_tiempo", "anio_censo", "area_cultivos_permanentes_ha", "area_cultivos_transitorios_ha", "area_agropecuaria_ha"]
+    df_fact = df[[c for c in cols if c in df.columns]]
 
     upsert(engine, "fact_censo_agropecuario", df_fact, ["id_municipio", "anio_censo"])
 
 def load_fact_precios_insumos(engine, df_insumos: pd.DataFrame):
     """
-    Carga hechos de precios de insumos IPIA.
-
-    Corrección 3.4.c: Filtra datos sintéticos antes del upsert.
+    Carga hechos de precios de insumos IPIA cruzando con dimensiones.
     """
     if df_insumos is None or df_insumos.empty: return
 
     logger.info("FACT_INSUMOS: Cargando %s registros...", len(df_insumos))
 
-    # Corrección 3.4.c: Filtrar datos sintéticos
-    if "es_sintetico" in df_insumos.columns:
-        df_real = df_insumos[df_insumos["es_sintetico"] == False].copy()
-        df_sintetico = df_insumos[df_insumos["es_sintetico"] == True]
-        if len(df_sintetico) > 0:
-            logger.warning(
-                "%s registros sintéticos de insumos excluidos del upsert. "
-                "Revisar conexión con API IPIA.",
-                len(df_sintetico)
-            )
-        if df_real.empty:
-            logger.warning("FACT_INSUMOS: Todos los registros son sintéticos, omitiendo upsert.")
-            return
-        upsert(engine, "fact_precios_insumos", df_real, ["id_tiempo", "tipo_insumo", "nombre_insumo", "id_region"])
-    else:
-        upsert(engine, "fact_precios_insumos", df_insumos, ["id_tiempo", "tipo_insumo", "nombre_insumo", "id_region"])
+    dim_tiempo_db = _safe_read_sql("SELECT id_tiempo, anio, mes FROM dim_tiempo", engine)
+    # Para insumos, usamos el ID de la nación (00000) o región si está disponible. 
+    # Por defecto vinculamos a ID_REGION 1 (Nacional) si no hay detalle.
+    
+    df = df_insumos.copy()
+    if "fecha" in df.columns:
+        df["anio"] = df["fecha"].dt.year
+        df["mes"] = df["fecha"].dt.month
+        df = df.merge(dim_tiempo_db, on=["anio", "mes"], how="inner")
+    
+    if "id_region" not in df.columns:
+        df["id_region"] = 1 # Nacional
+    
+    # Filtrar reales
+    if "es_sintetico" in df.columns:
+        df = df[df["es_sintetico"] == False]
+
+    if df.empty:
+        logger.warning("FACT_INSUMOS: No hay registros reales para cargar.")
+        return
+
+    cols = ["id_tiempo", "tipo_insumo", "nombre_insumo", "id_region", "precio_cop_unidad"]
+    df_fact = df[[c for c in cols if c in df.columns]].dropna(subset=["id_tiempo", "id_region"])
+    
+    upsert(engine, "fact_precios_insumos", df_fact, ["id_tiempo", "tipo_insumo", "nombre_insumo", "id_region"])
+

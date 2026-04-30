@@ -239,6 +239,14 @@ def _extract_variable(
     Separa la lógica de iteración, cache y conteo de fallos del código
     específico de cada variable.
     """
+    if out_file.exists():
+        try:
+            df_old = pd.read_parquet(out_file)
+            if not df_old.empty:
+                logger.info(f"{variable_name}: Archivo consolidado detectado. Saltando descarga para evitar peticiones innecesarias.")
+                return df_old
+        except: pass
+
     out_dir.mkdir(parents=True, exist_ok=True)
     all_dfs = []
     consecutive_failures = 0

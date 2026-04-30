@@ -193,9 +193,12 @@ def train_and_report(engine=None) -> dict:
     # Obtener id_tiempo representativo por año (usando es_cierre_anual)
     # df_pred ya contiene id_tiempo de fact_produccion_agricola
 
-    # Intervalo de confianza aproximado (± 1 MAE)
-    df_pred["intervalo_confianza_inferior"] = df_pred["rendimiento_predicho_t_ha"] - mae
-    df_pred["intervalo_confianza_superior"] = df_pred["rendimiento_predicho_t_ha"] + mae
+    # Aplicar clipping para evitar valores físicamente imposibles (negativos)
+    df_pred["rendimiento_predicho_t_ha"] = df_pred["rendimiento_predicho_t_ha"].clip(lower=0)
+
+    # Intervalo de confianza aproximado (± 1 MAE) con clipping
+    df_pred["intervalo_confianza_inferior"] = (df_pred["rendimiento_predicho_t_ha"] - mae).clip(lower=0)
+    df_pred["intervalo_confianza_superior"] = (df_pred["rendimiento_predicho_t_ha"] + mae).clip(lower=0)
 
     _guardar_predicciones(engine, df_pred, id_version)
 
