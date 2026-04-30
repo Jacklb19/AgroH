@@ -13,7 +13,6 @@ const PBI_TABS = [
   { id: "panorama_pbi", label: "Panorama Ejecutivo", pageNum: 1, pageName: "56b0cd0922bc5dea7a03" },
   { id: "produccion",   label: "Producción",          pageNum: 2, pageName: "d1e8cfb98623cb22537b" },
   { id: "clima",        label: "Clima & Alertas",     pageNum: 3, pageName: "763fb90f5adea074007a" },
-  { id: "calidad",      label: "Calidad de Datos",    pageNum: 4, pageName: "7e21b3769922960aed06" },
 ];
 
 function getPbiUrl(cfg) {
@@ -24,7 +23,6 @@ const TAB_ICONS = {
   panorama_pbi: <Icon.target />,
   produccion:   <Icon.wheat />,
   clima:        <Icon.drop />,
-  calidad:      <Icon.shield />,
 };
 
 /* ── Vista General (siempre visible, datos ilustrativos) ─────────────── */
@@ -208,7 +206,7 @@ export default function PageDashboards() {
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span className="pbi-badge">Power BI</span>
               <span className="pbi-page-label">{activeCfg.label}</span>
-              <span className="pbi-page-num">Página {activeCfg.pageNum} / 4</span>
+              <span className="pbi-page-num">Página {activeCfg.pageNum} / 3</span>
             </div>
             <a href={getPbiUrl(activeCfg)} target="_blank" rel="noopener noreferrer" className="pbi-open-btn">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
