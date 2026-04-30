@@ -3,12 +3,9 @@ import pool from "@/lib/db";
 export async function GET() {
   try {
     const { rows } = await pool.query(`
-      SELECT DISTINCT c.nombre_cultivo
-      FROM dim_cultivo c
-      WHERE EXISTS (
-        SELECT 1 FROM pred_rendimiento pr WHERE pr.id_cultivo = c.id_cultivo
-      )
-      ORDER BY c.nombre_cultivo
+      SELECT DISTINCT nombre_cultivo
+      FROM dim_cultivo
+      ORDER BY nombre_cultivo
     `);
     const list = rows.map((r) => r.nombre_cultivo);
     return Response.json(list);
