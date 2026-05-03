@@ -133,38 +133,45 @@ def load_fact_clima_mensual(engine, df_clima_mensual: pd.DataFrame):
         # Asumimos que los primeros 2 dígitos del id_municipio son el depto
         df["id_depto"] = df["id_municipio"].astype(str).str.zfill(5).str[:2]
 
+        # 1. Intentar estimar Max/Min a partir de la Media si están faltantes
+        if "temperatura_max_c" in df.columns and "temperatura_media_c" in df.columns:
+            df["temperatura_max_c"] = df["temperatura_max_c"].fillna(df["temperatura_media_c"] + 4.5)
+        if "temperatura_min_c" in df.columns and "temperatura_media_c" in df.columns:
+            df["temperatura_min_c"] = df["temperatura_min_c"].fillna(df["temperatura_media_c"] - 4.5)
+
         for col in crit_cols:
-            # 1. Imputación por Estación Cercana (con ajuste de altitud)
+            # 2. Imputación por Estación Cercana (con ajuste de altitud)
             idx_nulos = df[df[col].isna()].index
             if len(idx_nulos) == 0: continue
             
-            df_valido = df[df[col].notna()][["id_tiempo", "latitud", "longitud", "altitud_msnm", "id_depto", col]]
+            df_valido = df[df[col].notna()][["id_tiempo", "latitud", "longitud", "altitud_msnm", col]]
             
-            for idx in idx_nulos:
-                row = df.loc[idx]
-                mes_valido = df_valido[df_valido["id_tiempo"] == row["id_tiempo"]]
-                
-                if not mes_valido.empty:
-                    # Intento 1: Estación más cercana (3D)
-                    dist = ((mes_valido["latitud"] - row["latitud"])**2 + 
-                            (mes_valido["longitud"] - row["longitud"])**2 + 
-                            ((mes_valido["altitud_msnm"] - row["altitud_msnm"])/1000)**2)**0.5
+            if not df_valido.empty:
+                for idx in idx_nulos:
+                    row = df.loc[idx]
+                    mes_valido = df_valido[df_valido["id_tiempo"] == row["id_tiempo"]]
                     
-                    nearest_row = mes_valido.iloc[dist.argmin()]
-                    val = nearest_row[col]
-                    if "temperatura" in col:
-                        val -= (row["altitud_msnm"] - nearest_row["altitud_msnm"]) / 100.0 * 0.65
-                    df.at[idx, col] = val
-                else:
-                    # Intento 2: Fallback Regional (Promedio del mismo depto en ese mes)
-                    # Esto ayuda cuando toda una zona está sin sensores de temp
-                    pass # Implementado abajo con groupby para velocidad
+                    if not mes_valido.empty:
+                        # Estación más cercana (3D)
+                        dist = ((mes_valido["latitud"] - row["latitud"])**2 + 
+                                (mes_valido["longitud"] - row["longitud"])**2 + 
+                                ((mes_valido["altitud_msnm"] - row["altitud_msnm"])/1000)**2)**0.5
+                        
+                        nearest_row = mes_valido.iloc[dist.argmin()]
+                        val = nearest_row[col]
+                        if "temperatura" in col:
+                            val -= (row["altitud_msnm"] - nearest_row["altitud_msnm"]) / 100.0 * 0.65
+                        df.at[idx, col] = val
 
-            # Fallback masivo por departamento si aún quedan nulos
+            # 3. Fallback masivo por departamento/tiempo
             if df[col].isna().any():
                 df[col] = df[col].fillna(df.groupby(["id_tiempo", "id_depto"])[col].transform("mean"))
+            
+            # 4. Fallback final: Promedio global por mes (ignorando el año) para evitar nulos totales
+            if df[col].isna().any():
+                df[col] = df[col].fillna(df.groupby(["mes"])[col].transform("mean"))
 
-        logger.info("FACT_CLIMA: Imputación finalizada.")
+        logger.info("FACT_CLIMA: Imputación avanzada finalizada.")
 
 
 

@@ -13,19 +13,13 @@ from load.db import get_engine
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("drop_columns")
 
-# Credenciales de Supabase (capturadas anteriormente)
-SB_USER = "postgres.snkgncnteijzyobofzis"
-SB_PASS = "U/C8KcPC-#m,e&c"
-SB_HOST = "aws-1-us-west-2.pooler.supabase.com"
-SB_PORT = 5432
-SB_NAME = "postgres"
-
-def get_supabase_engine():
-    encoded_password = urllib.parse.quote_plus(SB_PASS)
-    url = f"postgresql+psycopg2://{SB_USER}:{encoded_password}@{SB_HOST}:{SB_PORT}/{SB_NAME}"
-    return create_engine(url, connect_args={"sslmode": "require"})
+# La configuración se toma automáticamente de .env a través de load.db
+# Para ejecutar contra Supabase, asegúrese de que su .env tenga las credenciales del host remoto.
 
 def drop_columns_logic(engine, label):
+    if engine is None:
+        logger.error(f"No se pudo obtener el motor para {label}")
+        return
     logger.info(f"Eliminando columnas vacías en {label}...")
     drops = [
         ("fact_clima_mensual", ["brillo_solar_horas_dia"]),
@@ -45,18 +39,10 @@ def drop_columns_logic(engine, label):
                     logger.warning(f"-> Error eliminando {table}.{col}: {e}")
 
 if __name__ == "__main__":
-    # 1. Local
     try:
-        local_engine = get_engine()
-        drop_columns_logic(local_engine, "LOCAL")
+        engine = get_engine()
+        drop_columns_logic(engine, "BASE DE DATOS CONFIGURADA")
     except Exception as e:
-        logger.error(f"Error en LOCAL: {e}")
-
-    # 2. Supabase
-    try:
-        sb_engine = get_supabase_engine()
-        drop_columns_logic(sb_engine, "SUPABASE")
-    except Exception as e:
-        logger.error(f"Error en SUPABASE: {e}")
+        logger.error(f"Error durante el proceso: {e}")
 
     logger.info("Proceso de adelgazamiento finalizado.")
