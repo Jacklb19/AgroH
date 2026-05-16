@@ -63,6 +63,50 @@ LEFT JOIN enso_municipio em
    AND em.id_tiempo = fc.id_tiempo
 """
 
+# ── Categorías de tipo de evento (consistente entre dashboard y chat) ─────
+TIPOS_EVENTO = {
+    "SEQUIA":        "Sequía severa",
+    "EXCESO_LLUVIA": "Exceso de lluvias",
+    "ESTRES_TERMICO":"Estrés térmico",
+    "PLAGAS":        "Plagas y enfermedades",
+    "MERCADO":       "Volatilidad de mercado",
+    "NORMAL":        "Sin evento crítico",
+}
+
+
+def _clasificar_tipo_evento(row: pd.Series) -> str:
+    """
+    Clasifica el tipo de evento agronómico predominante.
+    Usa señales climáticas reales (SPI, anomalía, temperatura) en lugar de
+    la fase ENSO genérica.
+    """
+    spi      = float(row.get("indice_spi", 0) or 0)
+    anomalia = float(row.get("anomalia_precipitacion_pct", 0) or 0)
+    pdef     = float(row.get("prob_deficit", 0) or 0)
+    pexc     = float(row.get("prob_exceso", 0) or 0)
+    tmax     = float(row.get("temperatura_max_c", 0) or 0)
+    tmin     = float(row.get("temperatura_min_c", 0) or 0)
+    hum      = float(row.get("humedad_relativa_pct", 0) or 0)
+
+    # Sequía: SPI muy negativo, déficit hídrico alto o anomalía negativa fuerte
+    if spi < -1.0 or pdef > 0.7 or anomalia < -40:
+        return TIPOS_EVENTO["SEQUIA"]
+
+    # Exceso de lluvia: SPI positivo alto, prob exceso alta, anomalía positiva fuerte
+    if spi > 1.0 or pexc > 0.7 or anomalia > 50:
+        return TIPOS_EVENTO["EXCESO_LLUVIA"]
+
+    # Estrés térmico: temperatura máxima extrema
+    if tmax > 36 or tmin < 4:
+        return TIPOS_EVENTO["ESTRES_TERMICO"]
+
+    # Plagas y enfermedades: humedad alta + temperatura cálida
+    if hum > 80 and 22 <= tmax <= 32:
+        return TIPOS_EVENTO["PLAGAS"]
+
+    return TIPOS_EVENTO["NORMAL"]
+
+
 # ── Etiquetado heurístico de riesgo ─────────────────────────────────────────
 def _etiquetar_riesgo(row: pd.Series) -> str:
     """
@@ -189,10 +233,10 @@ def train_and_report(engine=None) -> dict:
         # Guardar las predicciones heurísticas directamente
         df_pred = df[["id_municipio", "id_tiempo"]].copy()
         df_pred["nivel_riesgo"]       = df["nivel_riesgo"].values
-        df_pred["tipo_evento"]        = df["fase_enso"].values
+        df_pred["tipo_evento"]        = df.apply(_clasificar_tipo_evento, axis=1).values
         df_pred["score_probabilidad"] = 0.5
         df_pred["descripcion_generada"] = df_pred.apply(
-            lambda r: f"Alerta {r['nivel_riesgo']} — Fase ENSO: {r['tipo_evento']} (heurística).",
+            lambda r: f"Alerta {r['nivel_riesgo']} — {r['tipo_evento']} (heurística).",
             axis=1,
         )
         df_pred["activa"]     = True
@@ -258,11 +302,11 @@ def train_and_report(engine=None) -> dict:
 
     df_pred = df[["id_municipio", "id_tiempo"]].copy()
     df_pred["nivel_riesgo"]      = [inv_label_map[p] for p in pred_todas]
-    df_pred["tipo_evento"]       = df["fase_enso"].values
+    df_pred["tipo_evento"]       = df.apply(_clasificar_tipo_evento, axis=1).values
     df_pred["score_probabilidad"] = score_todas.max(axis=1)
     df_pred["descripcion_generada"] = df_pred.apply(
         lambda r: (
-            f"Alerta {r['nivel_riesgo']} — Fase ENSO: {r['tipo_evento']}. "
+            f"Alerta {r['nivel_riesgo']} — {r['tipo_evento']}. "
             f"Probabilidad estimada: {r['score_probabilidad']:.0%}."
         ),
         axis=1,

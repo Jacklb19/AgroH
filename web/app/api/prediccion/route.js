@@ -15,6 +15,7 @@ export async function POST(request) {
       pr.rendimiento_predicho_t_ha      AS yhat,
       pr.intervalo_confianza_inferior   AS low,
       pr.intervalo_confianza_superior   AS high,
+      pr.shap_top                       AS shap_top,
       pa.nivel_riesgo                   AS risk,
       pa.score_probabilidad             AS score,
       fp.rendimiento_t_ha               AS hist
@@ -61,7 +62,13 @@ export async function POST(request) {
       const score = row.score != null ? Math.round(parseFloat(row.score) * 100) : null;
       const confidence = score ?? (risk === "BAJO" ? 86 : risk === "MEDIO" ? 78 : 64);
 
-      return Response.json({ muni, cultivo, year, semester, yhat, low, high, risk, confidence, hist, fromDB: true });
+      let shap = null;
+      if (row.shap_top) {
+        try { shap = typeof row.shap_top === "string" ? JSON.parse(row.shap_top) : row.shap_top; }
+        catch { shap = null; }
+      }
+
+      return Response.json({ muni, cultivo, year, semester, yhat, low, high, risk, confidence, hist, shap, fromDB: true });
     }
   } catch (err) {
     console.error("[prediccion] DB error:", err.message);

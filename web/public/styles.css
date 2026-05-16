@@ -2052,3 +2052,86 @@ h1, h2, h3, h4 { margin: 0; font-family: var(--font-display); letter-spacing: -0
   /* Tour tooltip — full-width on small screens */
   .tour-tooltip { max-width: calc(100vw - 32px) !important; }
 }
+
+/* ── Responsive refuerzo · iPhone SE / 375px ──────────────────────── */
+@media (max-width: 480px) {
+  .container { padding-left: 14px; padding-right: 14px; }
+
+  h2 { font-size: 22px !important; line-height: 1.25; }
+  h3 { font-size: 16px !important; }
+
+  /* Demo guiada — botón abajo del item, no al lado */
+  .demo-item { flex-wrap: wrap; }
+  .demo-item .tag { order: 4; }
+  .demo-item button { width: 100%; margin-top: 8px; }
+
+  /* SHAP panel + recomendación accionable */
+  .shap-panel { padding: 12px 14px; }
+
+  /* Tabla de comparación scrollea horizontal */
+  .compare-table-wrap, .metrics-table-wrap { overflow-x: auto; }
+  .compare-table, .metrics-table { min-width: 480px; }
+
+  /* Onboarding modal */
+  [role="dialog"] > div { padding: 22px 18px !important; max-width: calc(100vw - 24px) !important; }
+
+  /* Toggles Power BI ↔ Modo offline apilados */
+  .tabs { flex-wrap: wrap; }
+  .tab  { flex: 1 1 100%; justify-content: center; }
+}
+
+@media (max-width: 380px) {
+  .impact-stat { font-size: 24px !important; }
+  .chat-input  { font-size: 13px; }
+}
+
+/* ── Accesibilidad WCAG AA ────────────────────────────────────────── */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 12px;
+  background: var(--blue-700);
+  color: white;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  z-index: 9999;
+  text-decoration: none;
+  transition: top 0.2s;
+}
+.skip-link:focus {
+  top: 12px;
+  outline: 3px solid #f59e0b;
+}
+
+button:focus-visible,
+a:focus-visible,
+[role="dialog"]:focus-visible,
+[tabIndex]:focus-visible,
+.tab:focus-visible,
+.chat-chip:focus-visible,
+.chat-send:focus-visible,
+.chat-clear:focus-visible,
+.btn-tour-start:focus-visible,
+.pbi-open-btn:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+/* Texto secundario con contraste suficiente */
+.muted, .panel-sub, .chart-metric .l, .impact-stat-label {
+  color: #4b5563 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(220,38,38,0.45); }
+  50%      { transform: scale(1.06); box-shadow: 0 0 0 8px rgba(220,38,38,0);  }
+}

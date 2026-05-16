@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useState } from "react";
 import Hero from "./Hero";
 import KpiStrip from "./KpiStrip";
 import ColombiaMap from "./charts/ColombiaMap";
@@ -6,6 +7,11 @@ import Sparkline from "./charts/Sparkline";
 import { Icon } from "./icons";
 
 export default function PageInicio({ onNav }) {
+  const [puntos, setPuntos] = useState([]);
+  useEffect(() => {
+    fetch("/api/mapa").then((r) => r.json()).then(setPuntos).catch(() => setPuntos([]));
+  }, []);
+
   return (
     <>
       <Hero onNav={onNav} />
@@ -33,16 +39,7 @@ export default function PageInicio({ onNav }) {
               </div>
               <div className="card-body">
                 <div className="map-frame">
-                  <ColombiaMap pins={[
-                    { x: 145, y: 80,  color: "#dc2626" },
-                    { x: 175, y: 105, color: "#1a7a4a" },
-                    { x: 205, y: 140, color: "#d97706" },
-                    { x: 160, y: 165, color: "#1a7a4a" },
-                    { x: 130, y: 195, color: "#d97706" },
-                    { x: 195, y: 210, color: "#1a7a4a" },
-                    { x: 110, y: 130, color: "#dc2626" },
-                    { x: 220, y: 175, color: "#1a7a4a" },
-                  ]} height={260} />
+                  <ColombiaMap puntos={puntos} height={260} />
                 </div>
                 <div className="legend-row">
                   <span className="legend-dot">Estable</span>

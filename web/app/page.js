@@ -8,6 +8,7 @@ import PagePrediccion from "./components/PagePrediccion";
 import PageMetodologia from "./components/PageMetodologia";
 import PageImpacto from "./components/PageImpacto";
 import PageAsistente from "./components/PageAsistente";
+import OnboardingModal from "./components/OnboardingModal";
 
 export default function App() {
   const [active, setActive] = useState("inicio");
@@ -19,8 +20,9 @@ export default function App() {
 
   return (
     <>
+      <OnboardingModal onNav={onNav} />
       <Nav active={active} onNav={onNav} />
-      <main className="main">
+      <main id="main" className="main" tabIndex={-1}>
         {active === "inicio"      && <PageInicio      onNav={onNav} />}
         {active === "dashboards"  && <PageDashboards  />}
         {active === "prediccion"  && <PagePrediccion  />}

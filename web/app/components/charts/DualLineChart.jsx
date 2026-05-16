@@ -1,10 +1,20 @@
 "use client";
 
-export default function DualLineChart({ height = 280 }) {
-  const real = [3.4, 3.5, 3.7, 3.6, 3.9, 4.1, 4.2, 4.0, 4.3, 4.6, 4.8];
-  const pred = [3.45, 3.55, 3.65, 3.7, 3.85, 4.05, 4.15, 4.1, 4.35, 4.55, 4.78, 4.9, 5.05];
+export default function DualLineChart({ height = 280, data = null }) {
+  let real, pred, anios;
+  if (Array.isArray(data) && data.length > 0) {
+    anios = data.map((d) => d.anio);
+    real  = data.map((d) => d.real).filter((v) => v != null);
+    pred  = data.map((d) => d.predicho ?? null);
+  } else {
+    real  = [3.4, 3.5, 3.7, 3.6, 3.9, 4.1, 4.2, 4.0, 4.3, 4.6, 4.8];
+    pred  = [3.45, 3.55, 3.65, 3.7, 3.85, 4.05, 4.15, 4.1, 4.35, 4.55, 4.78, 4.9, 5.05];
+    anios = Array.from({ length: pred.length }, (_, i) => 2015 + i);
+  }
   const w = 620, h = height, pad = { l: 40, r: 28, t: 28, b: 36 };
-  const minY = 3.2, maxY = 5.2;
+  const allVals = [...real, ...pred].filter((v) => v != null && !Number.isNaN(v));
+  const minY = Math.max(0, Math.floor(Math.min(...allVals, 3.2) * 10) / 10 - 0.2);
+  const maxY = Math.ceil(Math.max(...allVals, 5.2) * 10) / 10 + 0.2;
   const xs1 = real.map((_, i) => pad.l + (i * (w - pad.l - pad.r)) / (pred.length - 1));
   const ys1 = real.map((v) => pad.t + (1 - (v - minY) / (maxY - minY)) * (h - pad.t - pad.b));
   const xs2 = pred.map((_, i) => pad.l + (i * (w - pad.l - pad.r)) / (pred.length - 1));
@@ -31,11 +41,13 @@ export default function DualLineChart({ height = 280 }) {
           </g>
         );
       })}
-      {[0, 4, 8, 12].map((i) => (
-        <text key={i} x={xs2[i]} y={h - 12} fontSize="10" fill="#9ca3af" textAnchor="middle" fontFamily="ui-monospace, monospace">
-          {2015 + i}
-        </text>
-      ))}
+      {[0, Math.floor(pred.length / 3), Math.floor((pred.length * 2) / 3), pred.length - 1]
+        .filter((i, k, arr) => i >= 0 && i < pred.length && arr.indexOf(i) === k)
+        .map((i) => (
+          <text key={i} x={xs2[i]} y={h - 12} fontSize="10" fill="#9ca3af" textAnchor="middle" fontFamily="ui-monospace, monospace">
+            {anios[i] ?? 2015 + i}
+          </text>
+        ))}
       <path d={predPath} fill="none" stroke="#1e4d7b" strokeWidth="2" strokeDasharray="5 4" strokeLinejoin="round" />
       <path d={realPath} fill="none" stroke="#1a7a4a" strokeWidth="2.5" strokeLinejoin="round" />
       {xs1.map((x, i) => (

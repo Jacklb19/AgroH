@@ -39,6 +39,16 @@ SOURCES = {
     "sipra_geojson": "https://sipra.upra.gov.co/geoserver/ows",
     # DIVIPOLA
     "divipola": "https://www.datos.gov.co/resource/gdxc-w37w.json",
+    # ANT — tierras formalizadas (verificar resource ID actual antes de correr)
+    "ant_tierras": "https://www.datos.gov.co/resource/ckwx-9gr5.json",
+    # Finagro — crédito agropecuario (verificar resource ID actual)
+    "finagro_credito": "https://www.datos.gov.co/resource/8e8j-2x86.json",
+    # NASA POWER — clima diario reanalysis MERRA-2 (gratis, sin key)
+    "nasa_power": "https://power.larc.nasa.gov/api/temporal/daily/point",
+    # World Bank Open Data — indicadores macro-agrícolas para Colombia
+    "world_bank":  "https://api.worldbank.org/v2/country/COL/indicator",
+    # FAOSTAT — producción agrícola oficial FAO/ONU
+    "faostat_qcl": "https://fenixservices.fao.org/faostat/api/v1/en/data/QCL",
 }
 
 # Radio máximo join espacial clima-municipio (km)

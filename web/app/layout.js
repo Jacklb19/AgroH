@@ -19,6 +19,7 @@ export default function RootLayout({ children }) {
         <link rel="stylesheet" href="/styles.css" />
       </head>
       <body>
+        <a href="#main" className="skip-link">Saltar al contenido principal</a>
         <div className="app">{children}</div>
       </body>
     </html>

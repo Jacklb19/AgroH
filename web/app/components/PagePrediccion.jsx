@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import ConfidenceBar from "./charts/ConfidenceBar";
+import GemeloDigital from "./GemeloDigital";
 import { Icon } from "./icons";
 
 /* ── Pasos del tour ─────────────────────────────────────────────────── */
@@ -195,9 +196,56 @@ function ResultPanel({ r }) {
           ? <> muestra una desviación de <strong>{sign}{(r.yhat - r.hist).toFixed(2)} t/ha</strong> frente al rendimiento histórico registrado.</>
           : <> tiene un rendimiento esperado de <strong>{r.yhat.toFixed(2)} t/ha</strong> para el período seleccionado.</>
         }
-        {" "}El modelo pondera anomalías de precipitación, índice ENSO y series históricas por municipio-cultivo,
-        con un MAE de 0.18 t/ha en el conjunto de validación.
+        {" "}El modelo pondera anomalías de precipitación, índice ENSO y series históricas por municipio-cultivo.
         {r.fromDB && <span style={{ display: "block", marginTop: 6, fontSize: 11, color: "var(--blue-700)", fontFamily: "var(--font-mono)" }}>✓ Predicción desde XGBoost · base de datos real</span>}
+      </div>
+
+      <ShapPanel shap={r.shap} />
+    </div>
+  );
+}
+
+/* ── Panel de explicabilidad SHAP ────────────────────────────────────── */
+function ShapPanel({ shap }) {
+  if (!Array.isArray(shap) || shap.length === 0) return null;
+  const maxAbs = Math.max(...shap.map((s) => Math.abs(s.shap || 0)), 0.001);
+  const labelize = (k) => k
+    .replace(/_/g, " ")
+    .replace(/\b(\w)/g, (m) => m.toUpperCase());
+
+  return (
+    <div className="shap-panel" style={{ marginTop: 16, padding: "14px 16px", background: "var(--gray-50, #f7f8fa)", borderRadius: 10, border: "1px solid var(--gray-200, #e5e7eb)" }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--blue-700)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 10 }}>
+        🔍 Por qué esta predicción · SHAP
+      </div>
+      {shap.map((s, i) => {
+        const v   = Number(s.shap || 0);
+        const pct = (Math.abs(v) / maxAbs) * 100;
+        const positive = v >= 0;
+        return (
+          <div key={i} style={{ marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+              <span style={{ fontWeight: 500 }}>{labelize(s.feature)}</span>
+              <span style={{ fontFamily: "var(--font-mono)", color: positive ? "#1a7a4a" : "#dc2626" }}>
+                {positive ? "+" : ""}{v.toFixed(3)}
+              </span>
+            </div>
+            <div style={{ height: 6, background: "#e5e7eb", borderRadius: 4, position: "relative", overflow: "hidden" }}>
+              <div style={{
+                position: "absolute",
+                left: positive ? "50%" : `${50 - pct / 2}%`,
+                width: `${pct / 2}%`,
+                height: "100%",
+                background: positive ? "#1a7a4a" : "#dc2626",
+                borderRadius: 4,
+              }} />
+              <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "#94a3b8" }} />
+            </div>
+          </div>
+        );
+      })}
+      <div style={{ fontSize: 11, color: "var(--gray-600, #6b7280)", marginTop: 6 }}>
+        Verde = empuja la predicción al alza · Rojo = la baja. Top 3 factores por impacto absoluto.
       </div>
     </div>
   );
@@ -308,7 +356,7 @@ export default function PagePrediccion() {
         body:    JSON.stringify({ muni, cultivo, year, semester, enso, lluvia }),
       });
       const data = await res.json();
-      setResult(data);
+      setResult({ ...data, escenario_enso: enso, escenario_lluvia: lluvia });
     } catch {
       const base      = 4.4 + (cultivo.includes("Arroz") ? 0.6 : 0) + (cultivo.includes("Café") ? -0.8 : 0) + (semester === "B" ? 0.15 : 0);
       const ensoAdj   = enso   === "El Niño" ? -0.5 : enso   === "La Niña" ? 0.3 : 0;
@@ -351,6 +399,7 @@ export default function PagePrediccion() {
                   <select value={muni} onChange={(e) => setMuni(e.target.value)}>
                     {municipios.map((m) => <option key={m}>{m}</option>)}
                   </select>
+                  <ClimaActualWidget muni={muni} />
                 </div>
               </div>
 
@@ -435,8 +484,104 @@ export default function PagePrediccion() {
           </div>
 
           {result && !loading && <CompareTable r={result} />}
+          {result && !loading && (
+            <RecomendacionPanel
+              muni={result.muni}
+              cultivo={result.cultivo}
+              enso={result.escenario_enso || "Neutral"}
+              lluvia={result.escenario_lluvia || "Normal"}
+            />
+          )}
+          {result && !loading && <GemeloDigital muni={result.muni} cultivo={result.cultivo} />}
         </div>
       </section>
     </>
+  );
+}
+
+/* ── Widget clima en vivo (Open-Meteo) ───────────────────────────────── */
+function ClimaActualWidget({ muni }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    if (!muni) return;
+    const nombre = muni.split(",")[0].trim();
+    fetch(`/api/clima/actual?municipio=${encodeURIComponent(nombre)}`)
+      .then((r) => r.json())
+      .then((d) => setData(d))
+      .catch(() => setData(null));
+  }, [muni]);
+
+  if (!data || data.error || !data.actual) return null;
+  const a = data.actual;
+  return (
+    <div style={{
+      marginTop: 12, padding: "10px 12px",
+      background: "linear-gradient(90deg, #1e4d7b 0%, #1a7a4a 100%)",
+      borderRadius: 10, color: "white",
+      display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap",
+    }}>
+      <span style={{ fontSize: 22 }}>{a.es_de_dia ? "☀️" : "🌙"}</span>
+      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{data.municipio}</span>
+        <span style={{ fontSize: 11, opacity: 0.85 }}>Open-Meteo · en vivo</span>
+      </div>
+      <div style={{ display: "flex", gap: 14, fontSize: 12, marginLeft: "auto", flexWrap: "wrap" }}>
+        <span>🌡 <strong>{a.temperatura_c}°C</strong></span>
+        <span>💧 {a.humedad_pct}%</span>
+        <span>☔ {a.precipitacion_mm} mm</span>
+        <span>💨 {a.viento_kmh} km/h</span>
+      </div>
+    </div>
+  );
+}
+
+/* ── Panel de recomendación accionable ───────────────────────────────── */
+function RecomendacionPanel({ muni, cultivo, enso, lluvia }) {
+  const [data,    setData]    = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch("/api/recomendacion", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ muni, cultivo, enso, lluvia }),
+    })
+      .then((r) => r.json())
+      .then((d) => setData(d))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [muni, cultivo, enso, lluvia]);
+
+  if (loading) return <div className="card" style={{ marginTop: 22 }}><div className="card-body">Calculando recomendación accionable…</div></div>;
+  if (!data || !data.recomendaciones) return null;
+
+  return (
+    <div className="card" style={{ marginTop: 22 }}>
+      <div className="card-head">
+        <div>
+          <h3>Recomendación accionable</h3>
+          <p>Calendario de siembra, dosis de fertilizante y manejo del riesgo según ENSO + aptitud SIPRA.</p>
+        </div>
+        <span className="src-badge">fact_aptitud_suelo + fact_alerta_enso</span>
+      </div>
+      <div className="card-body">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
+          {data.recomendaciones.map((r, i) => (
+            <div key={i} style={{ padding: "14px 16px", border: "1px solid var(--gray-200)", borderRadius: 10, background: "white" }}>
+              <div style={{ fontSize: 20, marginBottom: 6 }}>{r.icono}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{r.titulo}</div>
+              <div style={{ fontSize: 12, color: "var(--gray-700)", marginBottom: 6 }}>{r.detalle}</div>
+              <div style={{ fontSize: 11, color: "var(--blue-700)", fontStyle: "italic" }}>{r.ajuste}</div>
+            </div>
+          ))}
+        </div>
+        {data.rendimiento_proyectado != null && (
+          <div style={{ marginTop: 14, fontSize: 12, color: "var(--gray-600)" }}>
+            Proyección con escenario actual: <strong>{data.rendimiento_proyectado} t/ha</strong> · base {data.rendimiento_base ?? "—"} t/ha · aptitud SIPRA: <code>{data.aptitud_sipra || "n/d"}</code>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

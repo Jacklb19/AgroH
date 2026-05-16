@@ -13,6 +13,9 @@ python-dotenv
 apscheduler
 scikit-learn
 xgboost
+optuna
+shap
+statsmodels
 rich
 joblib
 xlrd

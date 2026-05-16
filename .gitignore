@@ -14,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -158,7 +158,21 @@ cython_debug/
 logs/
 data/raw/
 data/processed/
+data/quality_reports/
 *.log
 pipeline_output.txt
 models/saved/
 scratch/
+
+# Data file extensions (catch-all for files outside data/)
+*.parquet
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.csv.gz
+*.feather
+
+# Secrets
+.env
+.env.example

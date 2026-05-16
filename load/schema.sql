@@ -229,6 +229,25 @@ BEGIN
     END IF;
 END $$;
 
+-- ── CAPA 3.5: MEMORIA CONVERSACIONAL DEL ASISTENTE ────────────────
+CREATE TABLE IF NOT EXISTS chat_session (
+    id_session     UUID PRIMARY KEY,
+    user_label     VARCHAR(120),
+    creada_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ultima_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS chat_message (
+    id             SERIAL PRIMARY KEY,
+    id_session     UUID NOT NULL REFERENCES chat_session(id_session) ON DELETE CASCADE,
+    role           VARCHAR(15) NOT NULL CHECK (role IN ('user','assistant','tool')),
+    content        TEXT,
+    metadata       JSONB,
+    creada_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_message_session ON chat_message(id_session, creada_at);
+
 -- ── CAPA 4: VISTAS POWER BI ────────────────────
 
 -- Vista 1: Dashboard principal de producción agrícola con clima completo

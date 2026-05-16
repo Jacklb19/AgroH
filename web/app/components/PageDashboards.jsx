@@ -1,11 +1,148 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import KpiStrip from "./KpiStrip";
 import ColombiaMap from "./charts/ColombiaMap";
 import DualLineChart from "./charts/DualLineChart";
 import Donut from "./charts/Donut";
 import HBars from "./charts/HBars";
 import { Icon } from "./icons";
+
+/* ── Plan B: dashboards nativos alimentados por /api/dashboards ───────── */
+const COLORS = ["#d97706", "#1e4d7b", "#dc2626", "#1a7a4a", "#7c3aed", "#0891b2"];
+
+function DashboardsNativos() {
+  const [data, setData] = useState(null);
+  const [err,  setErr]  = useState(false);
+
+  useEffect(() => {
+    fetch("/api/dashboards")
+      .then((r) => r.json())
+      .then(setData)
+      .catch(() => setErr(true));
+  }, []);
+
+  if (err)   return <div className="card"><div className="card-body">No fue posible cargar los datos.</div></div>;
+  if (!data) return <div className="card"><div className="card-body">Cargando dashboards en vivo…</div></div>;
+
+  const donutSegs = data.alertas_por_tipo.map((a, i) => ({
+    label: a.tipo, value: a.total, color: COLORS[i % COLORS.length],
+  }));
+  const topItems  = data.top_municipios.map((m) => ({ l: m.municipio, v: m.rendimiento }));
+
+  return (
+    <div className="vista-general">
+      <div className="vista-general-banner">
+        <span className="vg-icon"><Icon.cpu /></span>
+        <div>
+          <strong>Modo offline · Charts nativos sobre el star schema</strong>
+          <p>Plan B en caso de que Power BI no esté disponible. Datos consultados en runtime desde <code>/api/dashboards</code>.{!data.fromDB && " · Datos de respaldo (BD no disponible)."}</p>
+        </div>
+      </div>
+
+      <div className="panel-grid-2" style={{ marginTop: 16 }}>
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <h3>Real vs. Predicho</h3>
+              <div className="panel-sub">Rendimiento medio · t/ha · serie anual</div>
+            </div>
+            <span className="src-badge">pred_rendimiento + fact_produccion</span>
+          </div>
+          <div className="card-body">
+            <DualLineChart height={300} data={data.serie_rendimiento} />
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <h3>Distribución de alertas</h3>
+              <div className="panel-sub">{data.alertas_por_tipo.reduce((s, a) => s + a.total, 0)} alertas activas · por tipo</div>
+            </div>
+            <span className="src-badge">pred_alerta_climatica</span>
+          </div>
+          <div className="card-body">
+            <div className="donut-row">
+              <Donut size={200} segments={donutSegs} />
+              <div className="bars">
+                {data.alertas_por_tipo.map((a, i) => (
+                  <div className="bar-item" key={a.tipo}>
+                    <div className="bar-meta"><span className="lbl">{a.tipo}</span><span className="val">{a.pct}%</span></div>
+                    <div className="bar-track"><span className="bar-fill" style={{ width: `${a.pct}%`, background: COLORS[i % COLORS.length] }}></span></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {Array.isArray(data.anomalias) && data.anomalias.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="card-head">
+            <div>
+              <h3>🔎 Anomalías detectadas · IsolationForest</h3>
+              <div className="panel-sub">Top {data.anomalias.length} predicciones marcadas como atípicas</div>
+            </div>
+            <span className="src-badge">pred_rendimiento.es_anomalia</span>
+          </div>
+          <div className="card-body">
+            <table className="compare-table">
+              <thead><tr><th>Municipio</th><th>Cultivo</th><th>Rendimiento</th><th>Score anomalía</th></tr></thead>
+              <tbody>
+                {data.anomalias.map((a, i) => (
+                  <tr key={i}>
+                    <td><strong>{a.municipio}</strong></td>
+                    <td>{a.cultivo}</td>
+                    <td className="num">{a.rendimiento} <span className="muted" style={{ fontSize: 11 }}>t/ha</span></td>
+                    <td className="num" style={{ color: "#dc2626" }}>{a.score}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="panel-grid-2" style={{ marginTop: 16 }}>
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <h3>Top municipios · rendimiento predicho</h3>
+              <div className="panel-sub">Promedio sobre <code>pred_rendimiento</code></div>
+            </div>
+            <span className="src-badge">pred_rendimiento</span>
+          </div>
+          <div className="card-body">
+            <HBars items={topItems} />
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <h3>Semáforo de riesgo</h3>
+              <div className="panel-sub">Distribución por nivel</div>
+            </div>
+            <span className="src-badge">pred_alerta_climatica</span>
+          </div>
+          <div className="card-body">
+            {[
+              { l: "Bajo",  v: data.semaforo.bajo,  color: "#1a7a4a" },
+              { l: "Medio", v: data.semaforo.medio, color: "#d97706" },
+              { l: "Alto",  v: data.semaforo.alto,  color: "#dc2626" },
+            ].map((s) => (
+              <div className="bar-item" key={s.l} style={{ marginBottom: 12 }}>
+                <div className="bar-meta"><span className="lbl">{s.l}</span><span className="val">{s.v}</span></div>
+                <div className="bar-track"><span className="bar-fill" style={{ width: `${Math.min(100, s.v)}%`, background: s.color }}></span></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const BASE_PBI = "https://app.powerbi.com/view?r=eyJrIjoiYTU5ODY5MmMtNzVmNy00MTQ0LWFhODItZTg0ODIzNDI0MTk5IiwidCI6IjhkMzY4MzZlLTZiNzUtNGRlNi1iYWI5LTVmNGIxNzc1NDI3ZiIsImMiOjR9";
 
@@ -25,8 +162,12 @@ const TAB_ICONS = {
   clima:        <Icon.drop />,
 };
 
-/* ── Vista General (siempre visible, datos ilustrativos) ─────────────── */
+/* ── Vista General (mapa real desde /api/mapa) ──────────────────────── */
 function VistaGeneral() {
+  const [puntos, setPuntos] = useState([]);
+  useEffect(() => {
+    fetch("/api/mapa").then((r) => r.json()).then(setPuntos).catch(() => setPuntos([]));
+  }, []);
   return (
     <div className="vista-general">
       <div className="vista-general-banner">
@@ -51,13 +192,7 @@ function VistaGeneral() {
           </div>
           <div className="card-body">
             <div className="map-frame" style={{ height: 320 }}>
-              <ColombiaMap pins={[
-                { x: 145, y: 80,  color: "#dc2626" }, { x: 175, y: 105, color: "#1a7a4a" },
-                { x: 205, y: 140, color: "#d97706" }, { x: 160, y: 165, color: "#1a7a4a" },
-                { x: 130, y: 195, color: "#d97706" }, { x: 195, y: 210, color: "#1a7a4a" },
-                { x: 110, y: 130, color: "#dc2626" }, { x: 220, y: 175, color: "#1a7a4a" },
-                { x: 170, y: 230, color: "#1a7a4a" }, { x: 135, y: 130, color: "#d97706" },
-              ]} height={300} />
+              <ColombiaMap puntos={puntos} height={300} />
             </div>
             <div className="legend-row" style={{ marginTop: 14 }}>
               <span className="legend-dot">Estable (51%)</span>
@@ -150,6 +285,7 @@ function VistaGeneral() {
 /* ── Página principal ────────────────────────────────────────────────── */
 export default function PageDashboards() {
   const [tab, setTab] = useState("panorama_pbi");
+  const [modoOffline, setModoOffline] = useState(false);
   const activeCfg = PBI_TABS.find((t) => t.id === tab);
 
   return (
@@ -163,8 +299,29 @@ export default function PageDashboards() {
           <p>Cada tablero combina tablas certificadas del star schema con visualizaciones interactivas. Series actualizadas a corte mensual sobre el pipeline ETL versionado.</p>
         </div>
 
-        {/* Vista general siempre visible */}
-        <VistaGeneral />
+        {/* Toggle Power BI ↔ Modo offline */}
+        <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 18 }}>
+          <button
+            className={`tab ${!modoOffline ? "active" : ""}`}
+            onClick={() => setModoOffline(false)}
+          >
+            <Icon.target /> Power BI embebido
+          </button>
+          <button
+            className={`tab ${modoOffline ? "active" : ""}`}
+            onClick={() => setModoOffline(true)}
+            title="Plan B: charts nativos alimentados desde /api/dashboards"
+          >
+            <Icon.cpu /> Modo offline · datos en vivo
+          </button>
+        </div>
+
+        {modoOffline ? (
+          <DashboardsNativos />
+        ) : (
+          <>
+            {/* Vista general siempre visible */}
+            <VistaGeneral />
 
         {/* Separador hacia los dashboards reales */}
         <div className="pbi-section-divider">
@@ -228,6 +385,8 @@ export default function PageDashboards() {
             />
           </div>
         </div>
+          </>
+        )}
 
       </div>
     </section>
