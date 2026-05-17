@@ -28,12 +28,22 @@ El procesamiento sigue un enfoque de validación explícita. No se asumen correc
 - Los datos validados se insertan en el motor PostgreSQL.
 - Se implementa una red de seguridad final con restricciones de base de datos (`load/data_quality_constraints.sql`) usando `CHECK`, `NOT NULL` y llaves foráneas. Estas protegen contra la inyección de datos fuera de flujo o fallos sistémicos.
 
-## Ejecución del MVP
+## Ejecución en Producción y Auditoría
 
-Dado que el módulo de limpieza está estructurado como un paquete interno (gracias a `__init__.py`), el orquestador principal debe ejecutarse desde la **raíz del proyecto** utilizando el flag `-m` de Python. 
+La orquestación del flujo de calidad de datos se gestiona a través del script central en la raíz del proyecto. El pipeline ejecuta la extracción, limpieza, validación por contratos y carga en base de datos.
 
-Comando correcto:
+### Comando Recomendado
+Para ejecutar el pipeline end-to-end con auditoría semántica y registro en `data_quality_log`, ejecuta:
+```bash
+python run_pipeline.py --mode all --once --use-clean-modules
+```
+
+### Ejecución Manual de Módulos
+Si deseas validar o probar un módulo de calidad de forma aislada, puedes ejecutarlo directamente desde la raíz del proyecto:
 ```bash
 python -m clean.clean_produccion
+python -m clean.clean_clima
+python -m clean.clean_divipola
 ```
-Esto garantiza que las rutas de importación absolutas funcionen y evita tener que modificar temporalmente la variable `sys.path`.
+
+Para una explicación exhaustiva de la arquitectura del almacén de datos (Star Schema) y las reglas específicas de los contratos semánticos, consulta el [README principal](../README.md).

@@ -142,7 +142,7 @@ def clean_and_validate_produccion(df_raw: pd.DataFrame, engine=None):
     if not df_invalid.empty:
         invalid_path = invalid_dir / "produccion_agricola_invalid.csv"
         df_invalid.to_csv(invalid_path, index=False)
-        console.print(f"\n[bold yellow]\[OK] {invalid_count} registros inválidos guardados en: {invalid_path}")
+        console.print(f"\n[bold yellow][OK] {invalid_count} registros inválidos guardados en: {invalid_path}")
         
     return df_valid, df_invalid
 

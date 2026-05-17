@@ -1,19 +1,17 @@
 """
 run_pipeline.py — Orquestador profesional del ETL AgroIA Colombia
-Uso: python run_pipeline.py --mode all --once
+Uso: python run_pipeline.py --mode all --once --use-clean-modules
 """
 import argparse
 import logging
 import sys
 import pandas as pd
 import numpy as np
-from datetime import datetime
 from config.settings import LOGS_DIR
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich import print as rprint
+from rich.progress import Progress, TextColumn
 
 # Configuración de consola profesional
 console = Console(safe_box=True, legacy_windows=False)
@@ -81,6 +79,7 @@ def run_core_etl(engine=None, use_clean_modules=False):
             df_divipola, _ = clean_and_validate_divipola(df_divipola, engine=engine)
             df_produccion, _ = clean_and_validate_produccion(df_produccion, engine=engine)
         else:
+            # ⚠️ DEPRECATED: Legacy path without contract validation. Pending removal.
             # Normalización interna de producción (flujo anterior)
             rename_map = {
                 "a_o": "anio", "rea_sembrada": "area_sembrada_ha",
@@ -151,6 +150,9 @@ def run_core_etl(engine=None, use_clean_modules=False):
             from clean.clean_clima import clean_and_validate_clima
             df_precip_mensual, _ = clean_and_validate_clima(df_precip_mensual, engine=engine)
             df_combinado_mensual, _ = clean_and_validate_clima(df_combinado_mensual, engine=engine)
+        else:
+            # ⚠️ DEPRECATED: Bypassing climate data quality validation. Pending removal.
+            logger.warning("Bypassing IDEAM Climate data contract validation (Legacy mode).")
             
         df_clima_mensual = unificar_clima_mensual(df_precip_mensual, df_combinado_mensual)
         if not df_clima_mensual.empty:
@@ -228,6 +230,9 @@ def run_extended_etl(engine=None, use_clean_modules=False):
         if use_clean_modules and not df_sipsa_raw.empty:
             from clean.clean_sipsa import clean_and_validate_sipsa
             df_sipsa_raw, _ = clean_and_validate_sipsa(df_sipsa_raw, engine=engine)
+        elif not use_clean_modules:
+            # ⚠️ DEPRECATED: Bypassing SIPSA price quality validation. Pending removal.
+            logger.warning("Bypassing SIPSA price data validation (Legacy mode).")
             
         df_precios = normalizar_precios_sipsa(df_sipsa_raw)
         if not df_precios.empty:
@@ -244,6 +249,9 @@ def run_extended_etl(engine=None, use_clean_modules=False):
         if use_clean_modules and not df_sipra.empty:
             from clean.clean_sipra import clean_and_validate_sipra
             df_sipra, _ = clean_and_validate_sipra(df_sipra, engine=engine)
+        elif not use_clean_modules:
+            # ⚠️ DEPRECATED: Bypassing SIPRA soil quality validation. Pending removal.
+            logger.warning("Bypassing SIPRA soil data validation (Legacy mode).")
             
         df_suelo = resumir_aptitud_suelo_por_municipio(df_sipra, df_divipola)
         if not df_suelo.empty:
@@ -300,6 +308,13 @@ def run_models(engine=None):
 
 def run_etl(mode: str = "all", use_clean_modules=False):
     print_banner()
+    if not use_clean_modules:
+        console.print(Panel(
+            "[bold yellow]⚠️ ADVERTENCIA: MODO LEGACY DETECTADO[/bold yellow]\n"
+            "El flujo sin '--use-clean-modules' está [red]DEPRECADO[/red] y será eliminado en futuras versiones.\n"
+            "Se recomienda ejecutar con: [green]python run_pipeline.py --mode all --once --use-clean-modules[/green]",
+            border_style="yellow"
+        ))
     from load.db import get_engine
     engine = get_engine()
     
