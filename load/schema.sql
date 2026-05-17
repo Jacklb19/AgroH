@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS fact_clima_mensual (
     UNIQUE (id_estacion, id_tiempo)
 );
 
+ALTER TABLE fact_clima_mensual ADD COLUMN IF NOT EXISTS brillo_solar_horas_dia DOUBLE PRECISION;
+
 CREATE TABLE IF NOT EXISTS fact_precios_mayoristas (
     id               SERIAL PRIMARY KEY,
     id_central       INT  NOT NULL REFERENCES dim_central_abastos(id_central),
@@ -98,6 +100,10 @@ CREATE TABLE IF NOT EXISTS fact_precios_mayoristas (
     volumen_abastecimiento_ton DOUBLE PRECISION,
     UNIQUE (id_central, id_cultivo, id_tiempo)
 );
+
+ALTER TABLE fact_precios_mayoristas ADD COLUMN IF NOT EXISTS precio_min_cop_kg DOUBLE PRECISION;
+ALTER TABLE fact_precios_mayoristas ADD COLUMN IF NOT EXISTS precio_max_cop_kg DOUBLE PRECISION;
+ALTER TABLE fact_precios_mayoristas ADD COLUMN IF NOT EXISTS volumen_abastecimiento_ton DOUBLE PRECISION;
 
 CREATE TABLE IF NOT EXISTS fact_aptitud_suelo (
     id               SERIAL PRIMARY KEY,
@@ -130,6 +136,11 @@ CREATE TABLE IF NOT EXISTS fact_alerta_enso (
     UNIQUE (id_tiempo, id_region)
 );
 
+ALTER TABLE fact_alerta_enso ADD COLUMN IF NOT EXISTS indice_spi DOUBLE PRECISION;
+ALTER TABLE fact_alerta_enso ADD COLUMN IF NOT EXISTS anomalia_precipitacion_pct DOUBLE PRECISION;
+ALTER TABLE fact_alerta_enso ADD COLUMN IF NOT EXISTS probabilidad_deficit_hidrico DOUBLE PRECISION;
+ALTER TABLE fact_alerta_enso ADD COLUMN IF NOT EXISTS probabilidad_exceso_hidrico DOUBLE PRECISION;
+
 CREATE TABLE IF NOT EXISTS fact_precios_insumos (
     id               SERIAL PRIMARY KEY,
     id_tiempo        INT  NOT NULL REFERENCES dim_tiempo(id_tiempo),
@@ -141,6 +152,11 @@ CREATE TABLE IF NOT EXISTS fact_precios_insumos (
     fuente_origen    VARCHAR(100),
     es_sintetico     BOOLEAN NOT NULL DEFAULT FALSE
 );
+
+ALTER TABLE fact_precios_insumos ADD COLUMN IF NOT EXISTS unidad_medida VARCHAR(20);
+ALTER TABLE fact_precios_insumos ADD COLUMN IF NOT EXISTS id_region INT;
+ALTER TABLE fact_precios_insumos ADD COLUMN IF NOT EXISTS fuente_origen VARCHAR(100);
+ALTER TABLE fact_precios_insumos ADD COLUMN IF NOT EXISTS es_sintetico BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- ── CAPA 3: MODELO IA ─────────────────────────
 

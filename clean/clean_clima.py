@@ -8,9 +8,21 @@ alineado al schema de fact_clima_mensual.
 import pandas as pd
 import numpy as np
 import logging
-from config.settings import DATA_PROCESSED
+import pandera.pandas as pa
+from rich.console import Console
+from rich.table import Table
+from clean.validation_contracts_clima import clima_schema
+from clean.quality_checks import (
+    normalizar_texto, 
+    parse_numeric_columns,
+    parse_datetime_columns,
+    categorize_error,
+    log_data_quality
+)
+from config.settings import DATA_PROCESSED, DATA_RAW
 
 logger = logging.getLogger(__name__)
+console = Console()
 
 
 def unificar_clima_mensual(df_precip: pd.DataFrame,
@@ -128,3 +140,85 @@ def unificar_clima_mensual(df_precip: pd.DataFrame,
     result.to_parquet(out, index=False)
     logger.info(f"Clima mensual unificado: {len(result)} registros -> {out}")
     return result
+
+def prepare_raw_clima(df_raw: pd.DataFrame) -> pd.DataFrame:
+    """Realiza el parseo técnico para los datos de Clima IDEAM."""
+    df = df_raw.copy()
+    
+    # 1. Parseo Numérico
+    if "valorobservado" in df.columns:
+        df = parse_numeric_columns(df, ["valorobservado"])
+        
+    # 2. Parseo de Fechas
+    if "fechaobservacion" in df.columns:
+        df = parse_datetime_columns(df, ["fechaobservacion"])
+
+    # 3. Normalización Semántica (Sensores y Nombres)
+    if "descripcionsensor" in df.columns:
+        # Se asegura de no tener espacios raros que rompan el cruce
+        df["descripcionsensor"] = df["descripcionsensor"].astype(str).str.strip()
+        
+    if "unidadmedida" in df.columns:
+        df["unidadmedida"] = df["unidadmedida"].astype(str).str.strip()
+
+    return df
+
+def clean_and_validate_clima(df_raw: pd.DataFrame, engine=None):
+    """Ejecuta el pipeline completo de limpieza y validación para Clima."""
+    console.rule("[bold blue]Iniciando Pipeline de Calidad: Clima IDEAM")
+    
+    df_prepared = prepare_raw_clima(df_raw)
+    df_valid = pd.DataFrame()
+    df_invalid = pd.DataFrame()
+    
+    error_counts_by_rule = {}
+    error_counts_by_category = {"parse_error": 0, "schema_error": 0, "business_rule_error": 0, "unknown_error": 0}
+
+    try:
+        df_valid = clima_schema.validate(df_prepared, lazy=True)
+        console.print("[bold green]¡Validación superada al 100%! No hay registros inválidos.")
+    except pa.errors.SchemaErrors as err:
+        failure_cases = err.failure_cases.copy()
+        failure_cases = failure_cases.drop_duplicates(subset=["index", "check"])
+        
+        grouped_errors = failure_cases.groupby("index")["check"].apply(lambda x: " | ".join(x.astype(str)))
+        df_invalid_indices = grouped_errors.index
+        
+        df_invalid = df_prepared.loc[df_invalid_indices].copy()
+        df_invalid["error_summary"] = grouped_errors
+        
+        failure_cases["category"] = failure_cases["check"].apply(categorize_error)
+        error_counts_by_rule = failure_cases["check"].value_counts().to_dict()
+        
+        cat_counts = failure_cases["category"].value_counts().to_dict()
+        for cat, cnt in cat_counts.items():
+            error_counts_by_category[cat] += cnt
+
+        valid_indices = df_prepared.index.difference(df_invalid_indices)
+        df_valid = df_prepared.loc[valid_indices].copy()
+
+    total = len(df_raw)
+    valid_count = len(df_valid)
+    invalid_count = len(df_invalid)
+    
+    if engine is not None:
+        log_data_quality(engine, "clima_ideam", total, valid_count, invalid_count, error_counts_by_category)
+        
+    table = Table(title="Resultados de Calidad de Datos (Clima)")
+    table.add_column("Métrica", style="cyan")
+    table.add_column("Cantidad", justify="right", style="magenta")
+    
+    table.add_row("Total Registros Raw", str(total))
+    table.add_row("Registros Válidos", str(valid_count))
+    table.add_row("Registros Inválidos", str(invalid_count))
+    console.print(table)
+    
+    invalid_dir = DATA_PROCESSED / "invalid"
+    invalid_dir.mkdir(parents=True, exist_ok=True)
+    
+    if not df_invalid.empty:
+        invalid_path = invalid_dir / "clima_invalid.csv"
+        df_invalid.to_csv(invalid_path, index=False)
+        console.print(f"\n[bold yellow][OK] {invalid_count} registros inválidos guardados en: {invalid_path}")
+        
+    return df_valid, df_invalid

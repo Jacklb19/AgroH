@@ -62,3 +62,4 @@ def _split_env_list(value: str | None) -> list[str]:
 
 
 ENSO_BOLETIN_URLS = _split_env_list(os.getenv("ENSO_BOLETIN_URLS"))
+SOCRATA_TOKEN = os.getenv("SOCRATA_APP_TOKEN", "")

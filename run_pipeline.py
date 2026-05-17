@@ -36,7 +36,7 @@ def print_banner():
         border_style="green"
     ))
 
-def run_core_etl(engine=None):
+def run_core_etl(engine=None, use_clean_modules=False):
     console.rule("[bold blue]PASO 1: ETL CORE (Producción y Clima)")
     
     with Progress(
@@ -75,19 +75,26 @@ def run_core_etl(engine=None):
         df_divipola    = extract_divipola()
         df_produccion  = extract_produccion()
         
-        # Normalización interna de producción
-        rename_map = {
-            "a_o": "anio", "rea_sembrada": "area_sembrada_ha",
-            "rea_cosechada": "area_cosechada_ha", "producci_n": "produccion_total_ton",
-            "rendimiento": "rendimiento_t_ha", "grupo_cultivo": "grupo_de_cultivo",
-            "ciclo_del_cultivo": "ciclo_de_cultivo", "c_digo_dane_municipio": "id_municipio"
-        }
-        df_produccion = df_produccion.rename(columns=rename_map)
-        num_cols = ["anio", "area_sembrada_ha", "area_cosechada_ha", "produccion_total_ton", "rendimiento_t_ha"]
-        for col in num_cols:
-            if col in df_produccion.columns:
-                df_produccion[col] = pd.to_numeric(df_produccion[col], errors="coerce")
-        df_produccion[num_cols[1:]] = df_produccion[num_cols[1:]].fillna(0)
+        if use_clean_modules:
+            from clean.clean_produccion import clean_and_validate_produccion
+            from clean.clean_divipola import clean_and_validate_divipola
+            df_divipola, _ = clean_and_validate_divipola(df_divipola, engine=engine)
+            df_produccion, _ = clean_and_validate_produccion(df_produccion, engine=engine)
+        else:
+            # Normalización interna de producción (flujo anterior)
+            rename_map = {
+                "a_o": "anio", "rea_sembrada": "area_sembrada_ha",
+                "rea_cosechada": "area_cosechada_ha", "producci_n": "produccion_total_ton",
+                "rendimiento": "rendimiento_t_ha", "grupo_cultivo": "grupo_de_cultivo",
+                "ciclo_del_cultivo": "ciclo_de_cultivo", "c_digo_dane_municipio": "id_municipio"
+            }
+            df_produccion = df_produccion.rename(columns=rename_map)
+            num_cols = ["anio", "area_sembrada_ha", "area_cosechada_ha", "produccion_total_ton", "rendimiento_t_ha"]
+            for col in num_cols:
+                if col in df_produccion.columns:
+                    df_produccion[col] = pd.to_numeric(df_produccion[col], errors="coerce")
+            df_produccion[num_cols[1:]] = df_produccion[num_cols[1:]].fillna(0)
+
 
         progress.update(task, description="[cyan]Obteniendo catálogo IDEAM...")
         from extract.extract_ideam_estaciones import extract_estaciones
@@ -140,6 +147,11 @@ def run_core_etl(engine=None):
         progress.update(task, description="[cyan]Cargando hechos de producción y clima...")
         load_all_facts(engine, df_produccion.dropna(subset=["id_municipio"]), pd.DataFrame())
         
+        if use_clean_modules:
+            from clean.clean_clima import clean_and_validate_clima
+            df_precip_mensual, _ = clean_and_validate_clima(df_precip_mensual, engine=engine)
+            df_combinado_mensual, _ = clean_and_validate_clima(df_combinado_mensual, engine=engine)
+            
         df_clima_mensual = unificar_clima_mensual(df_precip_mensual, df_combinado_mensual)
         if not df_clima_mensual.empty:
             load_fact_clima_mensual(engine, df_clima_mensual)
@@ -163,7 +175,7 @@ def run_core_etl(engine=None):
     return reporte
 
 
-def run_extended_etl(engine=None):
+def run_extended_etl(engine=None, use_clean_modules=False):
     console.rule("[bold magenta]PASO 2: ETL EXTENDIDO (Insumos, Suelos, Alertas)")
     
     with Progress(
@@ -213,6 +225,10 @@ def run_extended_etl(engine=None):
         # SIPSA
         progress.update(task, description="[magenta]Obteniendo Precios Mayoristas (SIPSA)...")
         df_sipsa_raw = extract_sipsa()
+        if use_clean_modules and not df_sipsa_raw.empty:
+            from clean.clean_sipsa import clean_and_validate_sipsa
+            df_sipsa_raw, _ = clean_and_validate_sipsa(df_sipsa_raw, engine=engine)
+            
         df_precios = normalizar_precios_sipsa(df_sipsa_raw)
         if not df_precios.empty:
             df_centrales = construir_dim_centrales(df_precios)
@@ -224,6 +240,11 @@ def run_extended_etl(engine=None):
         progress.update(task, description="[magenta]Analizando Aptitud de Suelos (SIPRA)...")
         df_divipola = extract_divipola()
         df_sipra = extract_sipra()
+        
+        if use_clean_modules and not df_sipra.empty:
+            from clean.clean_sipra import clean_and_validate_sipra
+            df_sipra, _ = clean_and_validate_sipra(df_sipra, engine=engine)
+            
         df_suelo = resumir_aptitud_suelo_por_municipio(df_sipra, df_divipola)
         if not df_suelo.empty:
             load_fact_aptitud_suelo(engine, df_suelo)
@@ -277,16 +298,16 @@ def run_models(engine=None):
         progress.update(task, description="[bold green]MODELOS IA Completados.")
 
 
-def run_etl(mode: str = "all"):
+def run_etl(mode: str = "all", use_clean_modules=False):
     print_banner()
     from load.db import get_engine
     engine = get_engine()
     
     if mode in {"core", "all"}:
-        run_core_etl(engine=engine)
+        run_core_etl(engine=engine, use_clean_modules=use_clean_modules)
     
     if mode in {"extended", "all"}:
-        run_extended_etl(engine=engine)
+        run_extended_etl(engine=engine, use_clean_modules=use_clean_modules)
         
     if mode in {"models", "all"}:
         run_models(engine=engine)
@@ -298,14 +319,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Orquestador AgroIA ETL")
     parser.add_argument("--once", action="store_true", help="Ejecuta una vez y sale")
     parser.add_argument("--mode", choices=["core", "extended", "models", "all"], default="all", help="Modo de ejecución")
+    parser.add_argument("--use-clean-modules", action="store_true", help="Utiliza los módulos de validación por contratos y logging de calidad")
     args = parser.parse_args()
 
     if args.once:
-        run_etl(mode=args.mode)
+        run_etl(mode=args.mode, use_clean_modules=args.use_clean_modules)
     else:
         from apscheduler.schedulers.blocking import BlockingScheduler
         scheduler = BlockingScheduler(timezone="America/Bogota")
-        scheduler.add_job(run_etl, "cron", day_of_week="mon", hour=2, minute=0, kwargs={"mode": "all"})
+        scheduler.add_job(run_etl, "cron", day_of_week="mon", hour=2, minute=0, kwargs={"mode": "all", "use_clean_modules": args.use_clean_modules})
         
         console.print(Panel(
             "[bold cyan]MODO SCHEDULER ACTIVO[/bold cyan]\n"

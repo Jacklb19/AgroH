@@ -28,9 +28,16 @@ def init_schema(engine):
     schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
     with open(schema_path, "r", encoding="utf-8") as f:
         sql = f.read()
-    with engine.begin() as conn:
-        conn.execute(text(sql))
-    logger.info("Schema inicializado correctamente")
+        
+    constraints_path = os.path.join(os.path.dirname(__file__), "data_quality_constraints.sql")
+    with open(constraints_path, "r", encoding="utf-8") as f:
+        constraints_sql = f.read()
+        
+    with engine.raw_connection() as raw_conn:
+        with raw_conn.cursor() as cursor:
+            cursor.execute(sql + "\n" + constraints_sql)
+        raw_conn.commit()
+    logger.info("Schema y constraints inicializados correctamente")
 
 
 def upsert(engine, table: str, df, conflict_cols: list):
