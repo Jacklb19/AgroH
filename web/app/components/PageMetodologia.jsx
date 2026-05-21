@@ -105,7 +105,7 @@ function AnovaCard({ test, datos }) {
       {/* Boxplot image */}
       <div style={{ background: "#fafafa", padding: "12px 18px", borderBottom: "1px solid var(--ink-100)", textAlign: "center" }}>
         <img
-          src={`/api/anova/imagen?f=${test.imagen}`}
+          src={`/images/${test.imagen}`}
           alt={`Boxplot: ${test.titulo}`}
           style={{ maxWidth: "100%", height: "auto", borderRadius: 8 }}
           loading="lazy"
@@ -166,7 +166,7 @@ function AnovaCard({ test, datos }) {
 function SectionAnova() {
   const [datos, setDatos] = useState([]);
   useEffect(() => {
-    fetch("/api/anova").then((r) => r.json()).then((d) => setDatos(d.pruebas || [])).catch(() => {});
+    fetch("/anova_data.json").then((r) => r.json()).then((d) => setDatos(d.pruebas || [])).catch(() => {});
   }, []);
 
   return (
