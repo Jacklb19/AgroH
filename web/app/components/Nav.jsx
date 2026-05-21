@@ -3,11 +3,12 @@ import { useState } from "react";
 import { Icon } from "./icons";
 
 const LINKS = [
-  { id: "inicio",     label: "Inicio" },
-  { id: "dashboards", label: "Dashboards" },
-  { id: "prediccion", label: "Predicción" },
-  { id: "asistente",  label: "Asistente IA" },
-  { id: "impacto",    label: "Impacto" },
+  { id: "inicio",      label: "Inicio" },
+  { id: "dashboards",  label: "Dashboards" },
+  { id: "prediccion",  label: "Predicción" },
+  { id: "asistente",   label: "Asistente IA" },
+  { id: "metodologia", label: "Metodología" },
+  { id: "impacto",     label: "Impacto" },
 ];
 
 export default function Nav({ active, onNav }) {
