@@ -47,18 +47,21 @@ REPORT_DIR = Path(__file__).resolve().parent.parent / "data" / "quality_reports"
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 PALETTE = {
-    "El Niño":      "#E8604C",
-    "La Niña":      "#4C9BE8",
-    "Neutro":       "#6DBF67",
-    "fertilizante": "#F4A261",
-    "agroquimico":  "#E76F51",
-    "semilla":      "#2A9D8F",
-    "combustible":  "#E9C46A",
-    "mano_de_obra": "#264653",
-    "Q1 (Ene-Mar)": "#A8DADC",
-    "Q2 (Abr-Jun)": "#457B9D",
-    "Q3 (Jul-Sep)": "#1D3557",
-    "Q4 (Oct-Dic)": "#E63946",
+    "El Niño":        "#E8604C",
+    "La Niña":        "#4C9BE8",
+    "Neutro":         "#6DBF67",
+    "fertilizante":   "#F4A261",
+    "agroquimico":    "#E76F51",
+    "semilla":        "#2A9D8F",
+    "combustible":    "#E9C46A",
+    "mano_de_obra":   "#264653",
+    "Q1 (Ene-Mar)":   "#A8DADC",
+    "Q2 (Abr-Jun)":   "#457B9D",
+    "Q3 (Jul-Sep)":   "#1D3557",
+    "Q4 (Oct-Dic)":   "#E63946",
+    "Ibagué":         "#7B2D8B",
+    "Pasto":          "#F4A261",
+    "Villavicencio":  "#2A9D8F",
 }
 DEFAULT_COLOR = "#888888"
 
@@ -118,44 +121,150 @@ def _tukey(series_list: list[np.ndarray], labels: list[str]) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────
+#  Formateo de ejes según tipo de dato
+# ─────────────────────────────────────────────────────────────────────
+
+def _fmt_cop(val, _pos=None):
+    """Formatea valores COP: 1 500 000 → $ 1.5 M  |  85 000 → $ 85 K"""
+    if val >= 1_000_000:
+        return f"$ {val/1_000_000:.1f} M"
+    if val >= 1_000:
+        return f"$ {int(val/1_000)} K"
+    return f"$ {int(val)}"
+
+
+def _fmt_mm(val, _pos=None):
+    return f"{val:,.0f} mm"
+
+
+def _fmt_mm_dia(val, _pos=None):
+    return f"{val:.1f} mm/día"
+
+
+# ─────────────────────────────────────────────────────────────────────
 #  Gráficas
 # ─────────────────────────────────────────────────────────────────────
 
 def _boxplot(grupos_data: dict[str, np.ndarray], title: str,
-             ylabel: str, filename: str, p_valor: float):
+             ylabel: str, filename: str, p_valor: float,
+             fmt: str = "default", log_scale: bool = False,
+             clip_pct: int | None = None):
+    """
+    fmt: "default" | "cop" | "mm" | "mm_dia"
+    log_scale: usar escala logarítmica en Y (útil cuando hay grupos con rangos muy distintos)
+    """
+    import matplotlib.ticker as ticker
+
     labels = list(grupos_data.keys())
     data   = [grupos_data[l] for l in labels]
     colors = [PALETTE.get(l, DEFAULT_COLOR) for l in labels]
 
-    fig, ax = plt.subplots(figsize=(max(7, len(labels) * 1.8), 5))
-    bp = ax.boxplot(data, patch_artist=True, notch=False,
-                    medianprops=dict(color="white", linewidth=2.5),
-                    whiskerprops=dict(linewidth=1.2),
-                    capprops=dict(linewidth=1.2),
-                    flierprops=dict(marker="o", markersize=3, alpha=0.4))
+    fig_w = max(8, len(labels) * 2.2)
+    fig, ax = plt.subplots(figsize=(fig_w, 6))
+    fig.patch.set_facecolor("#fafafa")
+    ax.set_facecolor("#fafafa")
+
+    bp = ax.boxplot(
+        data,
+        patch_artist=True,
+        notch=False,
+        medianprops=dict(color="white", linewidth=2.5),
+        whiskerprops=dict(color="#666", linewidth=1.3, linestyle="--"),
+        capprops=dict(color="#666", linewidth=1.5),
+        flierprops=dict(marker="o", markersize=3.5, alpha=0.25, markeredgewidth=0),
+        boxprops=dict(linewidth=0),
+        widths=0.55,
+    )
 
     for patch, color in zip(bp["boxes"], colors):
         patch.set_facecolor(color)
-        patch.set_alpha(0.85)
+        patch.set_alpha(0.88)
 
-    ax.set_xticks(range(1, len(labels) + 1))
-    ax.set_xticklabels(labels, fontsize=11)
-    ax.set_ylabel(ylabel, fontsize=11)
-    ax.set_title(f"{title}\nANOVA p = {p_valor:.4f}  {_sig_label(p_valor)}", fontsize=12, pad=12)
-    ax.grid(axis="y", linestyle="--", alpha=0.4)
+    # Media como diamante blanco
+    means = [np.mean(d) for d in data]
+    for i, mean_val in enumerate(means, 1):
+        ax.plot(i, mean_val, marker="D", color="white", markersize=6,
+                markeredgecolor="#333", markeredgewidth=1.2, zorder=5)
 
-    # Anotar n por grupo
+    # Anotar mediana encima de cada caja
     for i, (lbl, arr) in enumerate(grupos_data.items(), 1):
-        ax.text(i, ax.get_ylim()[0], f"n={len(arr)}", ha="center",
-                va="bottom", fontsize=9, color="#555")
+        median = np.median(arr)
+        if fmt == "cop":
+            med_txt = _fmt_cop(median)
+        elif fmt in ("mm", "mm_dia"):
+            med_txt = f"{median:.1f}"
+        else:
+            med_txt = f"{median:.1f}"
 
-    # Leyenda de significancia
-    legend_text = "* p<0.05   ** p<0.01   *** p<0.001   ns = no significativo"
-    fig.text(0.5, 0.01, legend_text, ha="center", fontsize=8, color="#666")
+        ymax_box = np.percentile(arr, 75)
+        ax.annotate(
+            med_txt,
+            xy=(i, median), xytext=(i, ymax_box),
+            ha="center", va="bottom", fontsize=9, fontweight="600",
+            color="#222",
+            arrowprops=dict(arrowstyle="-", color="#aaa", lw=0.8),
+        )
 
-    plt.tight_layout(rect=[0, 0.04, 1, 1])
+    # Escala Y y formato de ticks
+    if log_scale:
+        ax.set_yscale("log")
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(_fmt_cop))
+        ax.annotate("Escala logarítmica — cada división multiplica por 10",
+                    xy=(0.5, 1.01), xycoords="axes fraction",
+                    ha="center", fontsize=8, color="#888", style="italic")
+    else:
+        if fmt == "cop":
+            ax.yaxis.set_major_formatter(ticker.FuncFormatter(_fmt_cop))
+        elif fmt == "mm":
+            ax.yaxis.set_major_formatter(ticker.FuncFormatter(_fmt_mm))
+        elif fmt == "mm_dia":
+            ax.yaxis.set_major_formatter(ticker.FuncFormatter(_fmt_mm_dia))
+
+    # Etiquetas eje X: nombre del grupo + n
+    xlabels = [f"{lbl}\n(n = {len(grupos_data[lbl]):,})".replace(",", ".") for lbl in labels]
+    ax.set_xticks(range(1, len(labels) + 1))
+    ax.set_xticklabels(xlabels, fontsize=10.5)
+    ax.set_ylabel(ylabel, fontsize=11, labelpad=10)
+
+    # Recortar eje Y si hay outliers extremos
+    if clip_pct is not None and not log_scale:
+        all_vals = np.concatenate(list(grupos_data.values()))
+        ymax = np.percentile(all_vals, clip_pct)
+        ymin = max(0, np.percentile(all_vals, 1))
+        ax.set_ylim(ymin, ymax * 1.05)
+        n_clip = int(np.sum(all_vals > ymax))
+        if n_clip > 0:
+            ax.annotate(
+                f"↑ {n_clip} valores extremos fuera de vista (máx: {_fmt_mm(all_vals.max())})",
+                xy=(0.5, 0.98), xycoords="axes fraction",
+                ha="center", va="top", fontsize=8, color="#888", style="italic",
+            )
+
+    # Grid horizontal limpio
+    ax.grid(axis="y", linestyle="--", linewidth=0.7, alpha=0.5, color="#ccc")
+    ax.set_axisbelow(True)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#ddd")
+    ax.spines["bottom"].set_color("#ddd")
+
+    # Título principal + resultado ANOVA
+    sig = _sig_label(p_valor)
+    sig_color = {"***": "#155436", "**": "#1a7a4a", "*": "#d97706", "ns": "#888"}.get(sig, "#333")
+    ax.set_title(title, fontsize=13, fontweight="700", pad=14, loc="left")
+
+    resultado_txt = (
+        f"ANOVA: F significativo ({sig})  ·  p = {p_valor:.2e}  →  "
+        f"{'las diferencias entre grupos son reales' if sig != 'ns' else 'sin diferencia significativa'}"
+        if sig != "ns" else f"ANOVA p = {p_valor:.4f} — sin diferencia significativa"
+    )
+    fig.text(0.02, 0.01,
+             f"◆ = media del grupo   ━ = mediana   {resultado_txt}",
+             fontsize=8, color="#555")
+
+    plt.tight_layout(rect=[0, 0.05, 1, 1])
     out = REPORT_DIR / filename
-    fig.savefig(out, dpi=150, bbox_inches="tight")
+    fig.savefig(out, dpi=160, bbox_inches="tight", facecolor="#fafafa")
     plt.close(fig)
     print(f"  Gráfica guardada: {out}")
 
@@ -210,10 +319,12 @@ def prueba1_precipitacion_enso(verbose: bool = False):
         print(tukey_df.to_string(index=False))
 
     _boxplot(grupos_data,
-             title="Precipitación mensual por Fase ENSO",
-             ylabel="Precipitación (mm)",
+             title="Precipitación mensual por Fase ENSO\n(El Niño · La Niña · Neutro)",
+             ylabel="Precipitación mensual (mm)",
              filename="anova_precipitacion_enso.png",
-             p_valor=p)
+             p_valor=p,
+             fmt="mm",
+             clip_pct=95)
 
     results.append(AnovaResult(
         nombre="Precipitación vs Fase ENSO",
@@ -277,10 +388,12 @@ def prueba2_precio_tipo_insumo(verbose: bool = False):
         print(tukey_df.to_string(index=False))
 
     _boxplot(grupos_data,
-             title="Precio de insumos por Tipo",
-             ylabel="Precio (COP / unidad)",
+             title="Precio de insumos agrícolas por tipo\n(fertilizante · agroquímico · semilla · combustible · mano de obra)",
+             ylabel="Precio por unidad (pesos colombianos)",
              filename="anova_precio_tipo_insumo.png",
-             p_valor=p)
+             p_valor=p,
+             fmt="cop",
+             log_scale=True)
 
     results.append(AnovaResult(
         nombre="Precio insumos vs Tipo",
@@ -349,10 +462,12 @@ def prueba3_precipitacion_trimestre(verbose: bool = False):
         print(tukey_df.to_string(index=False))
 
     _boxplot(grupos_data,
-             title="Precipitación mensual por Trimestre (Estacionalidad Colombia)",
-             ylabel="Precipitación (mm)",
+             title="Precipitación mensual por trimestre\n(Estacionalidad bimodal de Colombia)",
+             ylabel="Precipitación mensual (mm)",
              filename="anova_precipitacion_trimestre.png",
-             p_valor=p)
+             p_valor=p,
+             fmt="mm",
+             clip_pct=95)
 
     results.append(AnovaResult(
         nombre="Precipitación vs Trimestre",
@@ -366,6 +481,76 @@ def prueba3_precipitacion_trimestre(verbose: bool = False):
         significativa=sig,
         tukey_df=tukey_df,
         nota="Trimestres del calendario civil. Captura bimodalidad lluvias Colombia.",
+    ))
+
+
+# ─────────────────────────────────────────────────────────────────────
+#  PRUEBA 4 — Precipitación diaria NASA POWER por municipio (otra fuente)
+# ─────────────────────────────────────────────────────────────────────
+
+def prueba4_precipitacion_nasa_municipios(verbose: bool = False):
+    print("\n" + "═" * 60)
+    print("  PRUEBA 4 — Precipitación diaria NASA POWER por municipio")
+    print("  (Ibagué / Pasto / Villavicencio — 2024)")
+    print("═" * 60)
+
+    nasa_path = Path(__file__).resolve().parent.parent / "data" / "raw" / "nasa_power" / "clima_diario.parquet"
+    if not nasa_path.exists():
+        print("  [SKIP] No se encontró data/raw/nasa_power/clima_diario.parquet")
+        return
+
+    df = pd.read_parquet(nasa_path)
+    df = df.dropna(subset=["precipitacion_mm", "nombre_municipio"])
+    df = df[df["precipitacion_mm"] >= 0]
+
+    municipios = ["Ibagué", "Pasto", "Villavicencio"]
+    grupos_data: dict[str, np.ndarray] = {}
+    for muni in municipios:
+        sub = df[df["nombre_municipio"] == muni]["precipitacion_mm"].values
+        if len(sub) >= 3:
+            grupos_data[muni] = sub
+
+    if len(grupos_data) < 2:
+        print("  [SKIP] Datos insuficientes para ANOVA.")
+        return
+
+    n_por_grupo = {k: len(v) for k, v in grupos_data.items()}
+    print(f"  Registros por grupo: {n_por_grupo}")
+    print(f"  Fuente: NASA POWER reanalysis MERRA-2 (precipitación diaria mm)")
+
+    lev_p, f, p = _run_anova(grupos_data)
+    sig = p < 0.05
+
+    print(f"  Levene p = {lev_p:.4f}  ({'varianzas heterogéneas' if lev_p < 0.05 else 'varianzas OK'})")
+    print(f"  ANOVA   F = {f:.3f},  p = {p:.6f}  {_sig_label(p)}")
+    print(f"  Conclusión: {'Diferencias SIGNIFICATIVAS entre municipios (NASA POWER)' if sig else 'Sin diferencias significativas'}")
+
+    tukey_df = None
+    if sig and verbose:
+        tukey_df = _tukey(list(grupos_data.values()), list(grupos_data.keys()))
+        print("\n  Post-hoc Tukey HSD:")
+        print(tukey_df.to_string(index=False))
+
+    _boxplot(grupos_data,
+             title="Precipitación diaria por municipio — NASA POWER 2024\n(Reanálisis satelital MERRA-2)",
+             ylabel="Precipitación diaria (mm/día)",
+             filename="anova_precipitacion_nasa_municipios.png",
+             p_valor=p,
+             fmt="mm_dia",
+             clip_pct=98)
+
+    results.append(AnovaResult(
+        nombre="Precip. diaria NASA POWER por municipio",
+        variable="precipitacion_mm",
+        factor="municipio (NASA POWER)",
+        grupos=list(grupos_data.keys()),
+        n_por_grupo=n_por_grupo,
+        levene_p=lev_p,
+        f_stat=f,
+        p_valor=p,
+        significativa=sig,
+        tukey_df=tukey_df,
+        nota="Fuente externa: NASA POWER reanalysis MERRA-2. Contrasta con pruebas 1-3 basadas en IDEAM.",
     ))
 
 
@@ -415,7 +600,7 @@ def print_summary():
 # ─────────────────────────────────────────────────────────────────────
 
 def run_all(verbose: bool = False):
-    pruebas = [prueba1_precipitacion_enso, prueba2_precio_tipo_insumo, prueba3_precipitacion_trimestre]
+    pruebas = [prueba1_precipitacion_enso, prueba2_precio_tipo_insumo, prueba3_precipitacion_trimestre, prueba4_precipitacion_nasa_municipios]
     for fn in pruebas:
         try:
             fn(verbose=verbose)

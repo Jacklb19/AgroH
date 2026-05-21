@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(python -m validate.anova_tests --verbose)",
+      "Bash(npx next *)",
+      "Bash(ping -n 5 127.0.0.1)",
+      "Bash(python -m validate.anova_tests)"
+    ]
+  }
+}

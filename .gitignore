@@ -164,7 +164,7 @@ pipeline_output.txt
 models/saved/
 scratch/
 
-# Data file extensions (catch-all for files outside data/)
+# Data file extensions (catch-all para archivos generados por scripts)
 *.parquet
 *.pkl
 *.joblib
@@ -172,7 +172,23 @@ scratch/
 *.hdf5
 *.csv.gz
 *.feather
+*.csv
+*.xlsx
+*.xls
+
+# Imágenes generadas por scripts
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+
+# Next.js
+web/.next/
+web/node_modules/
+web/out/
 
 # Secrets
 .env
 .env.example
+AgroIA_Informe_Diseno_Web.docx
