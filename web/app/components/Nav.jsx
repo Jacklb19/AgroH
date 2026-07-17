@@ -8,7 +8,6 @@ const LINKS = [
   { id: "prediccion",  label: "Predicción" },
   { id: "asistente",   label: "Asistente IA" },
   { id: "metodologia", label: "Metodología" },
-  { id: "impacto",     label: "Impacto" },
 ];
 
 export default function Nav({ active, onNav }) {

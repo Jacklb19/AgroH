@@ -23,7 +23,6 @@ export default function Footer({ onNav }) {
           <div className="footer-col">
             <h5>Equipo</h5>
             <a onClick={() => onNav("metodologia")}>Metodología</a>
-            <a onClick={() => onNav("impacto")}>Impacto</a>
             <a>Repositorio</a>
           </div>
           <div className="footer-col">
