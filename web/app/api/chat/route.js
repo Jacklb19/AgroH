@@ -1,10 +1,12 @@
 import pool from "@/lib/db";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+const GROQ_URL      = "https://api.groq.com/openai/v1/chat/completions";
 /* ID del modelo configurable vía env. Por defecto Claude Sonnet 4.5 (estable y
    disponible en producción). Si tu cuenta tiene acceso a 4.6 puedes ponerlo
    en .env como ANTHROPIC_MODEL=claude-sonnet-4-6. */
-const MODEL      = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+const GROQ_MODEL      = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 const MAX_TOKENS = 1500;
 
 const SYSTEM_PROMPT = `Eres AgroIA, asistente de inteligencia agroclimática con acceso a una base de datos real de Colombia.
@@ -151,6 +153,17 @@ const TOOLS = [
     },
   },
 ];
+
+/* Groq (y otros proveedores compatibles con OpenAI) esperan las tools en
+   formato {type:"function", function:{name, description, parameters}}. */
+const OPENAI_TOOLS = TOOLS.map((t) => ({
+  type: "function",
+  function: {
+    name:        t.name,
+    description: t.description,
+    parameters:  t.input_schema,
+  },
+}));
 
 /* ── Ejecutores SQL ──────────────────────────────────────────────────── */
 async function ejecutarHerramienta(name, args, intento = 0) {
@@ -394,21 +407,7 @@ async function _persistMessage(sessionId, role, content, metadata = null) {
   }
 }
 
-export async function POST(request) {
-  const { messages, sessionId } = await request.json();
-
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return Response.json({ error: "ANTHROPIC_API_KEY no configurada" }, { status: 500 });
-
-  const sid = await _ensureSession(sessionId);
-
-  const chatMessages = messages
-    .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m) => ({ role: m.role, content: m.content }));
-
-  const lastUser = [...messages].reverse().find((m) => m.role === "user");
-  if (sid && lastUser) await _persistMessage(sid, "user", lastUser.content);
-
+async function runAnthropic(apiKey, chatMessages, sid) {
   /* Prompt caching: marcamos system prompt y la última tool como cacheables.
      Reduce ~90% el costo de input en llamadas dentro de 5 min. */
   const systemBlocks = [
@@ -430,7 +429,7 @@ export async function POST(request) {
         "anthropic-beta":    "prompt-caching-2024-07-31",
       },
       body: JSON.stringify({
-        model:       MODEL,
+        model:       ANTHROPIC_MODEL,
         system:      systemBlocks,
         messages:    chatMessages,
         tools:       toolsCached,
@@ -448,7 +447,7 @@ export async function POST(request) {
       return Response.json(
         {
           error: `Error Anthropic ${res.status}: ${detail}`,
-          model_intentado: MODEL,
+          model_intentado: ANTHROPIC_MODEL,
           hint: res.status === 404
             ? "Modelo no encontrado en tu cuenta. Define ANTHROPIC_MODEL en .env (ej. claude-sonnet-4-5, claude-3-5-sonnet-20241022, claude-haiku-4-5)."
             : res.status === 401
@@ -500,4 +499,104 @@ export async function POST(request) {
   }
 
   return Response.json({ reply: "No pude procesar tu consulta. Intenta reformularla." });
+}
+
+/* ── Handler alterno · Groq (API compatible con OpenAI Chat Completions) ── */
+async function runGroq(apiKey, chatMessages, sid) {
+  const messages = [{ role: "system", content: SYSTEM_PROMPT }, ...chatMessages];
+
+  for (let iter = 0; iter < 5; iter++) {
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model:       GROQ_MODEL,
+        messages,
+        tools:       OPENAI_TOOLS,
+        max_tokens:  MAX_TOKENS,
+        temperature: 0.2,
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      let parsed = null;
+      try { parsed = JSON.parse(errText); } catch {}
+      console.error("[chat:groq] HTTP", res.status, errText);
+      const detail = parsed?.error?.message || errText || `HTTP ${res.status}`;
+      return Response.json(
+        {
+          error: `Error Groq ${res.status}: ${detail}`,
+          model_intentado: GROQ_MODEL,
+          hint: res.status === 404
+            ? "Modelo no encontrado. Define GROQ_MODEL en .env (ej. llama-3.3-70b-versatile, llama-3.1-8b-instant)."
+            : res.status === 401
+              ? "API key inválida. Revisa GROQ_API_KEY en Vercel."
+              : res.status === 400
+                ? "Request mal formado. Revisa los logs del servidor."
+                : "Falla del servicio Groq. Reintenta en 30s.",
+        },
+        { status: 500 },
+      );
+    }
+
+    const data = await res.json();
+    const choice = data.choices?.[0];
+    const msg = choice?.message || {};
+
+    /* tool_calls → ejecutar todas las herramientas y continuar el turno */
+    if (msg.tool_calls?.length) {
+      messages.push({ role: "assistant", content: msg.content || null, tool_calls: msg.tool_calls });
+
+      const resultados = await Promise.all(
+        msg.tool_calls.map(async (tc) => {
+          let args = {};
+          try { args = JSON.parse(tc.function.arguments || "{}"); } catch {}
+          console.log(`[chat] herramienta: ${tc.function.name}`, args);
+          const result = await ejecutarHerramienta(tc.function.name, args);
+          return { role: "tool", tool_call_id: tc.id, content: JSON.stringify(result) };
+        })
+      );
+
+      messages.push(...resultados);
+      continue;
+    }
+
+    /* fin natural → devolver el contenido de texto */
+    const reply = msg.content || "Sin respuesta.";
+    if (sid) await _persistMessage(sid, "assistant", reply);
+    return Response.json({ reply, sessionId: sid });
+  }
+
+  return Response.json({ reply: "No pude procesar tu consulta. Intenta reformularla." });
+}
+
+export async function POST(request) {
+  const { messages, sessionId } = await request.json();
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const groqKey      = process.env.GROQ_API_KEY;
+
+  if (!anthropicKey && !groqKey) {
+    return Response.json(
+      { error: "Falta configurar ANTHROPIC_API_KEY o GROQ_API_KEY en las variables de entorno." },
+      { status: 500 },
+    );
+  }
+
+  const sid = await _ensureSession(sessionId);
+
+  const chatMessages = messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({ role: m.role, content: m.content }));
+
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  if (sid && lastUser) await _persistMessage(sid, "user", lastUser.content);
+
+  return anthropicKey
+    ? runAnthropic(anthropicKey, chatMessages, sid)
+    : runGroq(groqKey, chatMessages, sid);
 }
