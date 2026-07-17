@@ -38,7 +38,7 @@ function TypingDots() {
   );
 }
 
-function Mensaje({ msg }) {
+function Mensaje({ msg, onHablar, hablando }) {
   const isUser = msg.role === "user";
   return (
     <div className={`chat-bubble ${isUser ? "user" : "ai"}`}>
@@ -50,6 +50,28 @@ function Mensaje({ msg }) {
             {i < msg.content.split("\n").length - 1 && <br />}
           </span>
         ))}
+        {!isUser && onHablar && (
+          <button
+            type="button"
+            className={`chat-speak${hablando ? " active" : ""}`}
+            onClick={onHablar}
+            title={hablando ? "Detener lectura" : "Escuchar respuesta"}
+            aria-label={hablando ? "Detener lectura" : "Escuchar respuesta"}
+          >
+            {hablando ? (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <rect x="6" y="6" width="12" height="12" rx="2"/>
+              </svg>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+              </svg>
+            )}
+            {hablando ? "Detener" : "Escuchar"}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -106,16 +128,33 @@ export default function PageAsistente() {
     try { rec.start(); setEscuchando(true); } catch {}
   };
 
-  const hablar = (texto) => {
+  /* ── Lectura en voz alta bajo demanda (botón por mensaje) ───────── */
+  const [hablandoIdx, setHablandoIdx] = useState(null);
+
+  const toggleHablar = (texto, idx) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
+    /* si ya está leyendo este mensaje → detener */
+    if (hablandoIdx === idx) {
+      window.speechSynthesis.cancel();
+      setHablandoIdx(null);
+      return;
+    }
     const limpio = String(texto || "").replace(/[*_`>#]/g, "").slice(0, 600);
     const u = new SpeechSynthesisUtterance(limpio);
     u.lang  = "es-CO";
     u.rate  = 1.05;
     u.pitch = 1;
+    u.onend   = () => setHablandoIdx(null);
+    u.onerror = () => setHablandoIdx(null);
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
+    setHablandoIdx(idx);
   };
+
+  /* detener la voz al desmontar la página */
+  useEffect(() => {
+    return () => { try { window.speechSynthesis?.cancel(); } catch {} };
+  }, []);
 
   useEffect(() => {
     const el = messagesRef.current;
@@ -148,7 +187,6 @@ export default function PageAsistente() {
         reply = "Sin respuesta del servidor.";
       }
       setMessages([...newMsgs, { role: "assistant", content: reply }]);
-      if (vozDisponible && reply && data.reply) hablar(reply);
     } catch {
       setMessages([...newMsgs, {
         role:    "assistant",
@@ -244,7 +282,14 @@ export default function PageAsistente() {
               )}
 
               {/* Mensajes */}
-              {messages.map((m, i) => <Mensaje key={i} msg={m} />)}
+              {messages.map((m, i) => (
+                <Mensaje
+                  key={i}
+                  msg={m}
+                  hablando={hablandoIdx === i}
+                  onHablar={m.role === "assistant" ? () => toggleHablar(m.content, i) : undefined}
+                />
+              ))}
               {loading && <TypingDots />}
             </div>
 
