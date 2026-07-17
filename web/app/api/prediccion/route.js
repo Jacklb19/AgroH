@@ -22,7 +22,7 @@ export async function POST(request) {
     FROM pred_rendimiento pr
     JOIN dim_municipio m ON pr.id_municipio = m.id_municipio
     JOIN dim_cultivo   c ON pr.id_cultivo   = c.id_cultivo
-    JOIN dim_tiempo    t ON pr.id_tiempo    = t.id_tiempo
+    LEFT JOIN dim_tiempo t ON pr.id_tiempo  = t.id_tiempo
     LEFT JOIN pred_alerta_climatica pa
       ON pa.id_municipio = pr.id_municipio AND pa.id_tiempo = pr.id_tiempo
     LEFT JOIN fact_produccion_agricola fp
@@ -32,6 +32,10 @@ export async function POST(request) {
     WHERE m.nombre_municipio ILIKE $1
       AND c.nombre_cultivo   ILIKE $2
   `;
+
+  /* Comparativo regional: municipios del mismo departamento con el mismo cultivo */
+  const departamento = (muniParts[1] || "").trim();
+  let vecinos = [];
 
   try {
     /* Intento 1: con el año exacto que pidió el usuario */
@@ -43,9 +47,38 @@ export async function POST(request) {
     /* Intento 2: sin restricción de año — usa el dato más reciente disponible */
     if (rows.length === 0) {
       ({ rows } = await pool.query(
-        SELECT + " ORDER BY t.anio DESC, t.mes DESC LIMIT 1",
+        SELECT + " ORDER BY t.anio DESC NULLS LAST, t.mes DESC NULLS LAST LIMIT 1",
         [`%${nombreMuni}%`, `%${cultivo}%`]
       ));
+    }
+
+    if (departamento) {
+      try {
+        const { rows: vRows } = await pool.query(`
+          SELECT m.nombre_municipio || ', ' || m.nombre_departamento AS municipio,
+                 ROUND(AVG(pr.rendimiento_predicho_t_ha)::numeric, 2) AS rendimiento,
+                 (SELECT pa.nivel_riesgo
+                    FROM pred_alerta_climatica pa
+                   WHERE pa.id_municipio = m.id_municipio
+                   ORDER BY pa.score_probabilidad DESC LIMIT 1) AS riesgo
+          FROM pred_rendimiento pr
+          JOIN dim_municipio m ON m.id_municipio = pr.id_municipio
+          JOIN dim_cultivo   c ON c.id_cultivo   = pr.id_cultivo
+          WHERE m.nombre_departamento ILIKE $1
+            AND c.nombre_cultivo      ILIKE $2
+            AND m.nombre_municipio NOT ILIKE $3
+          GROUP BY m.id_municipio, m.nombre_municipio, m.nombre_departamento
+          ORDER BY rendimiento DESC
+          LIMIT 4
+        `, [`%${departamento}%`, `%${cultivo}%`, `%${nombreMuni}%`]);
+        vecinos = vRows.map((v) => ({
+          name:  v.municipio,
+          yld:   parseFloat(v.rendimiento),
+          risk:  v.riesgo || "BAJO",
+        }));
+      } catch (err) {
+        console.error("[prediccion:vecinos]", err.message);
+      }
     }
 
     if (rows.length > 0) {
@@ -68,7 +101,7 @@ export async function POST(request) {
         catch { shap = null; }
       }
 
-      return Response.json({ muni, cultivo, year, semester, yhat, low, high, risk, confidence, hist, shap, fromDB: true });
+      return Response.json({ muni, cultivo, year, semester, yhat, low, high, risk, confidence, hist, shap, vecinos, fromDB: true });
     }
   } catch (err) {
     console.error("[prediccion] DB error:", err.message);
@@ -99,5 +132,6 @@ export async function POST(request) {
     high: +(yhat + 1.2).toFixed(2),
     risk, confidence,
     hist: +(4.2 + muniVar).toFixed(2),
+    vecinos,
   });
 }

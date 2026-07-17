@@ -185,11 +185,11 @@ async function ejecutarHerramienta(name, args, intento = 0) {
           FROM pred_rendimiento pr
           JOIN dim_municipio m ON pr.id_municipio = m.id_municipio
           JOIN dim_cultivo   c ON pr.id_cultivo   = c.id_cultivo
-          JOIN dim_tiempo    t ON pr.id_tiempo    = t.id_tiempo
+          LEFT JOIN dim_tiempo t ON pr.id_tiempo  = t.id_tiempo
           LEFT JOIN pred_alerta_climatica pa
             ON pa.id_municipio = pr.id_municipio AND pa.id_tiempo = pr.id_tiempo
           ${where}
-          ORDER BY t.anio DESC, t.mes DESC LIMIT 8
+          ORDER BY t.anio DESC NULLS LAST, t.mes DESC NULLS LAST LIMIT 8
         `, params);
         return rows.length
           ? { predicciones: rows, total: rows.length }
@@ -209,7 +209,7 @@ async function ejecutarHerramienta(name, args, intento = 0) {
                  t.anio, t.mes
           FROM pred_alerta_climatica pa
           JOIN dim_municipio m ON pa.id_municipio = m.id_municipio
-          JOIN dim_tiempo    t ON pa.id_tiempo    = t.id_tiempo
+          LEFT JOIN dim_tiempo t ON pa.id_tiempo  = t.id_tiempo
           ${where}
           ORDER BY pa.score_probabilidad DESC LIMIT $${params.length}
         `, params);
@@ -266,9 +266,9 @@ async function ejecutarHerramienta(name, args, intento = 0) {
                  ROUND(fc.temperatura_min_c::numeric, 1)  AS temp_min_c
           FROM fact_clima_mensual fc
           JOIN dim_municipio m ON fc.id_municipio = m.id_municipio
-          JOIN dim_tiempo    t ON fc.id_tiempo    = t.id_tiempo
+          LEFT JOIN dim_tiempo t ON fc.id_tiempo  = t.id_tiempo
           WHERE m.nombre_municipio ILIKE $1
-          ORDER BY t.anio DESC, t.mes DESC LIMIT 12
+          ORDER BY t.anio DESC NULLS LAST, t.mes DESC NULLS LAST LIMIT 12
         `, [`%${args.municipio}%`]);
         return rows.length
           ? { registros_climaticos: rows, total: rows.length }
@@ -314,10 +314,10 @@ async function ejecutarHerramienta(name, args, intento = 0) {
           FROM pred_rendimiento pr
           JOIN dim_municipio m ON pr.id_municipio = m.id_municipio
           JOIN dim_cultivo   c ON pr.id_cultivo   = c.id_cultivo
-          JOIN dim_tiempo    t ON pr.id_tiempo    = t.id_tiempo
+          LEFT JOIN dim_tiempo t ON pr.id_tiempo  = t.id_tiempo
           WHERE m.nombre_municipio ILIKE $1
             AND c.nombre_cultivo   ILIKE $2
-          ORDER BY t.anio DESC, t.mes DESC LIMIT 1
+          ORDER BY t.anio DESC NULLS LAST, t.mes DESC NULLS LAST LIMIT 1
         `, [`%${args.municipio}%`, `%${args.cultivo}%`]);
         if (!rows.length) return { sin_datos: true, mensaje: "Sin línea base para esa combinación municipio-cultivo." };
         const base   = parseFloat(rows[0].rendimiento_base);

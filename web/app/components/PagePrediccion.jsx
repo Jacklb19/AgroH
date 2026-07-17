@@ -251,36 +251,35 @@ function ShapPanel({ shap }) {
   );
 }
 
-/* ── Tabla comparativa ───────────────────────────────────────────────── */
+/* ── Tabla comparativa (vecinos reales del mismo departamento) ───────── */
 function CompareTable({ r }) {
-  const neighbors = [
-    { name: "Espinal, Tolima",      yld: r.yhat + 0.3, risk: "BAJO",  delta: +6.2 },
-    { name: "Guamo, Tolima",        yld: r.yhat - 0.4, risk: "MEDIO", delta: -2.1 },
-    { name: "Saldaña, Tolima",      yld: r.yhat + 0.1, risk: "BAJO",  delta: +3.4 },
-    { name: "Purificación, Tolima", yld: r.yhat - 0.7, risk: "ALTO",  delta: -8.7 },
-  ];
+  const neighbors = Array.isArray(r.vecinos) ? r.vecinos : [];
+  if (neighbors.length === 0) return null;
   return (
     <div className="compare-table-wrap fade-in">
       <div className="head">
         <div>
           <h3>Comparativo regional</h3>
-          <p>Municipios vecinos en el mismo corredor agrícola.</p>
+          <p>Municipios del mismo departamento con predicciones para {r.cultivo.toLowerCase()}.</p>
         </div>
         <span className="src-badge">pred_rendimiento · vecinos</span>
       </div>
       <table className="compare-table">
         <thead>
-          <tr><th>Municipio</th><th>Rendimiento</th><th>Riesgo</th><th>vs. histórico</th></tr>
+          <tr><th>Municipio</th><th>Rendimiento</th><th>Riesgo</th><th>vs. tu municipio</th></tr>
         </thead>
         <tbody>
-          {neighbors.map((n) => (
-            <tr key={n.name}>
-              <td><strong>{n.name}</strong></td>
-              <td className="num">{n.yld.toFixed(1)} <span className="muted" style={{ fontSize: 11 }}>t/ha</span></td>
-              <td><span className={`badge-risk ${n.risk.toLowerCase()}`}>{n.risk}</span></td>
-              <td className={n.delta >= 0 ? "pos num" : "neg num"}>{n.delta >= 0 ? "+" : ""}{n.delta.toFixed(1)}%</td>
-            </tr>
-          ))}
+          {neighbors.map((n) => {
+            const delta = r.yhat > 0 ? ((n.yld - r.yhat) / r.yhat) * 100 : 0;
+            return (
+              <tr key={n.name}>
+                <td><strong>{n.name}</strong></td>
+                <td className="num">{n.yld.toFixed(1)} <span className="muted" style={{ fontSize: 11 }}>t/ha</span></td>
+                <td><span className={`badge-risk ${n.risk.toLowerCase()}`}>{n.risk}</span></td>
+                <td className={delta >= 0 ? "pos num" : "neg num"}>{delta >= 0 ? "+" : ""}{delta.toFixed(1)}%</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
