@@ -6,7 +6,6 @@ import PageInicio from "./components/PageInicio";
 import PageDashboards from "./components/PageDashboards";
 import PagePrediccion from "./components/PagePrediccion";
 import PageMetodologia from "./components/PageMetodologia";
-import PageEconomia from "./components/PageEconomia";
 import PageImpacto from "./components/PageImpacto";
 import PageAsistente from "./components/PageAsistente";
 import OnboardingModal from "./components/OnboardingModal";
@@ -28,7 +27,6 @@ export default function App() {
         {active === "dashboards"  && <PageDashboards  />}
         {active === "prediccion"  && <PagePrediccion  />}
         {active === "asistente"   && <PageAsistente   />}
-        {active === "economia"    && <PageEconomia    />}
         {active === "metodologia" && <PageMetodologia />}
         {active === "impacto"     && <PageImpacto     onNav={onNav} />}
       </main>
