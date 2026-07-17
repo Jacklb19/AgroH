@@ -7,7 +7,6 @@ const LINKS = [
   { id: "dashboards",  label: "Dashboards" },
   { id: "prediccion",  label: "Predicción" },
   { id: "asistente",   label: "Asistente IA" },
-  { id: "economia",    label: "Economía" },
   { id: "metodologia", label: "Metodología" },
 ];
 

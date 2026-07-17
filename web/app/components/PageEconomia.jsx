@@ -35,6 +35,7 @@ function KpiRow({ kpis }) {
 /* ── Precios mayoristas (SIPSA) ──────────────────────────────────────── */
 function MayoristasCard({ mayoristas }) {
   if (mayoristas.length === 0) return null;
+  const hayVolumen = mayoristas.some((m) => m.volumen_ton != null);
   return (
     <div className="card" style={{ marginTop: 16 }}>
       <div className="card-head">
