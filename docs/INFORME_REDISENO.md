@@ -337,6 +337,7 @@ Archivo: `web/app/api/chat/route.js` (sobre la versión con Groq del equipo).
 - **Instrucciones (system prompt):** describen la BD real; prohíben inventar cifras ("usa SOLO cifras que aparezcan en los resultados", "menciona siempre el año"); si falta un dato, decirlo; aclarar que el riesgo ENSO es histórico; no afirmar "sin riesgo" sin datos; no comparar rendimientos entre cultivos distintos. Se eliminó la instrucción anterior que pedía responder con conocimiento general "sin mencionar que no hay información".
 - **Herramientas reescritas** sobre `pred_pronostico` y el rendimiento corregido: `buscar_prediccion`, `top_rendimiento` (con filtro P95), `resumen_general`, `comparar_municipios`, `proyectar_escenario` (tres escenarios reales del modelo), `recomendar_cultivo` (lo más sembrado, variabilidad, pronóstico con rango, aptitud UPRA), `buscar_clima` (**clima en vivo Open-Meteo** + histórico IDEAM rotulado con fecha), `listar_alertas` (rotulada como histórica/experimental).
 - **Búsqueda sin tildes** (`translate(lower(...))`) y **resolución de cultivo** (coincidencia exacta primero: "papa" ≠ "Papaya").
+- **Modelo de Groq:** `GROQ_MODEL` o, si no está definido, `openai/gpt-oss-20b`. Si el modelo configurado no existe en la cuenta (404), se reintenta automáticamente con `openai/gpt-oss-20b`. (El valor anterior por defecto, `llama-3.3-70b-versatile`, no está disponible en la cuenta del proyecto: por eso el chat fallaba en las vistas previas de Vercel, donde `GROQ_MODEL` solo existe para Production.)
 - **Límite de Groq (plan gratuito ~8.000 tokens/min):** reintento automático esperando lo que indica Groq (≤ 15 s, 2 veces); resultados de herramientas recortados a 3.500 caracteres; solo los últimos 8 mensajes del historial; si aún así se alcanza el límite, responde 429 `{ocupado: true}` y la página muestra "El asistente está recibiendo muchas consultas…".
 
 ---
@@ -405,7 +406,7 @@ Después de cualquiera de las opciones:
 | Variable | Dónde | Uso |
 |---|---|---|
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Vercel (Production y Preview) / `web/.env.local` | Web |
-| `GROQ_API_KEY` (+ `GROQ_MODEL` opcional) | Vercel / `web/.env.local` | Asistente |
+| `GROQ_API_KEY` (+ `GROQ_MODEL` opcional; por defecto `openai/gpt-oss-20b`) | Vercel / `web/.env.local` | Asistente |
 | `ANTHROPIC_API_KEY` (+ `ANTHROPIC_MODEL`) | Opcional; si existe, el chat usa Claude en lugar de Groq | Asistente |
 | `SUPABASE_DB_HOST`, `SUPABASE_DB_PORT`, `SUPABASE_DB_NAME`, `SUPABASE_DB_USER`, `SUPABASE_DB_PASSWORD` | `.env` raíz (no se sube) | Pipeline Python |
 

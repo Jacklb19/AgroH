@@ -7,7 +7,10 @@ const GROQ_URL      = "https://api.groq.com/openai/v1/chat/completions";
    disponible en producción). Si tu cuenta tiene acceso a 4.6 puedes ponerlo
    en .env como ANTHROPIC_MODEL=claude-sonnet-4-6. */
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
-const GROQ_MODEL      = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+/* Modelo de Groq: GROQ_MODEL o, si falta, uno disponible en la cuenta del proyecto.
+   Si el configurado deja de existir (404), se reintenta con el de respaldo. */
+const GROQ_MODEL_RESPALDO = "openai/gpt-oss-20b";
+const GROQ_MODEL          = process.env.GROQ_MODEL || GROQ_MODEL_RESPALDO;
 const MAX_TOKENS = 1500;
 
 const SYSTEM_PROMPT = `Eres AgroIA, asistente de inteligencia agroclimática con acceso a una base de datos real de Colombia.
@@ -564,6 +567,11 @@ async function fetchGroq(apiKey, body, intentos = 2) {
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
       body: JSON.stringify(body),
     });
+    if (res.status === 404 && body.model !== GROQ_MODEL_RESPALDO) {
+      console.error(`[chat:groq] modelo ${body.model} no disponible; uso ${GROQ_MODEL_RESPALDO}`);
+      body = { ...body, model: GROQ_MODEL_RESPALDO };
+      continue;
+    }
     if (res.status !== 429 || i >= intentos) return res;
     const texto = await res.clone().text();
     const sugerido = parseFloat(res.headers.get("retry-after")) || parseFloat((texto.match(/try again in ([\d.]+)s/) || [])[1]) || 5;
@@ -610,7 +618,7 @@ async function runGroq(apiKey, chatMessages, sid) {
           error: `Error Groq ${res.status}: ${detail}`,
           model_intentado: GROQ_MODEL,
           hint: res.status === 404
-            ? "Modelo no encontrado. Define GROQ_MODEL en .env (ej. llama-3.3-70b-versatile, llama-3.1-8b-instant)."
+            ? "Modelo no encontrado. Define GROQ_MODEL con un modelo disponible en tu cuenta de Groq (ej. openai/gpt-oss-20b)."
             : res.status === 401
               ? "API key inválida. Revisa GROQ_API_KEY en Vercel."
               : res.status === 400
