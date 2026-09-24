@@ -261,6 +261,15 @@ def run_models(engine=None):
             failures.append(f"rendimiento: {exc}")
             logger.exception("Modelo rendimiento fallo")
 
+        progress.update(task, description="[yellow]Entrenando Modelo: Pronóstico de rendimiento...")
+        try:
+            from models.train_pronostico import train_and_forecast
+            r3 = train_and_forecast(engine=engine, write=True)
+            logger.info(f"Pronóstico — R² backtest: {r3['metricas']['modelo']['r2']:.4f} (versión {r3['id_version']})")
+        except Exception as exc:
+            failures.append(f"pronostico: {exc}")
+            logger.exception("Modelo pronostico fallo")
+
         progress.update(task, description="[yellow]Entrenando Modelo: Alerta Climática...")
         try:
             from models.train_alerta_climatica import train_and_report as train_alerta

@@ -9,11 +9,11 @@ const IDEAS = [
     "Compara Espinal y Saldaña en rendimiento",
   ] },
   { tema: "Riesgo y clima", icon: Icon.cloudRain, preguntas: [
-    "Muéstrame las alertas de riesgo alto",
+    "¿Qué municipios tuvieron riesgo climático alto?",
     "¿Cómo está el clima en Ibagué?",
   ] },
   { tema: "Escenarios", icon: Icon.sliders, preguntas: [
-    "¿Qué pasa si hay El Niño en Pasto con maíz?",
+    "¿Qué pasa si hay El Niño en Pasto con papa?",
     "Proyecta café en Armenia con sequía",
   ] },
   { tema: "Qué sembrar", icon: Icon.sprout, preguntas: [
@@ -26,8 +26,8 @@ const CAPACIDADES = [
   "Consultar el rendimiento esperado por municipio y cultivo",
   "Comparar de 2 a 5 municipios",
   "Proyectar escenarios de El Niño, La Niña o sequía",
-  "Recomendar cultivos para una zona",
-  "Listar alertas climáticas y clima histórico",
+  "Mostrar qué se siembra más en una zona y cómo le ha ido",
+  "Consultar el riesgo climático histórico y el clima de un municipio",
 ];
 
 /* Formato mínimo para las respuestas: **negrita**, listas con "-", "•" o "1." */
@@ -179,7 +179,9 @@ export default function PageAsistente() {
       });
       const data = await res.json();
       const reply = data.reply
-        || (data.error ? "El asistente no está disponible en este momento. Inténtalo de nuevo más tarde." : "No recibimos respuesta del servidor.");
+        || (data.ocupado
+          ? "El asistente está recibiendo muchas consultas en este momento. Espera unos segundos y vuelve a preguntar."
+          : data.error ? "El asistente no está disponible en este momento. Inténtalo de nuevo más tarde." : "No recibimos respuesta del servidor.");
       if (data.error) console.warn("[asistente]", data.error, data.hint || "");
       setMessages([...newMsgs, { role: "assistant", content: reply }]);
     } catch {

@@ -1,6 +1,6 @@
 "use client";
 
-const RIESGO_COLOR = { ALTO: "#dc2626", MEDIO: "#d97706", BAJO: "#1a7a4a" };
+const COLOR = { sube: "#1a7a4a", estable: "#5b7fa6", baja: "#d97706" };
 
 /* Contorno simplificado de Colombia continental (lon, lat), sentido horario
    desde Sapzurro. Suficiente para ubicar municipios a esta escala. */
@@ -33,17 +33,15 @@ export default function ColombiaMap({ puntos = [], height = 280 }) {
     .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon))
     .map((p) => {
       const [x, y] = proj(p.lon, p.lat);
-      return {
-        x, y,
-        color: RIESGO_COLOR[p.riesgo] || "#6b7280",
-        label: [p.municipio, p.departamento].filter(Boolean).join(", "),
-        riesgo: p.riesgo,
-      };
+      return { ...p, x, y, color: COLOR[p.tendencia] || "#6b7280" };
     });
+  const denso = pins.length > 200;
+  /* Primero los estables para que los que cambian queden encima */
+  pins.sort((a, b) => (b.tendencia === "estable") - (a.tendencia === "estable"));
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={height} style={{ display: "block" }}
-      role="img" aria-label={`Mapa de Colombia con ${pins.length} municipios según su nivel de riesgo climático`}>
+      role="img" aria-label={`Mapa de Colombia con ${pins.length} municipios según el cambio esperado en su rendimiento`}>
       <defs>
         <linearGradient id="colFill" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#22a35f" stopOpacity="0.14" />
@@ -52,11 +50,11 @@ export default function ColombiaMap({ puntos = [], height = 280 }) {
       </defs>
       <path d={PATH} fill="url(#colFill)" stroke="#155436" strokeWidth="1.2" strokeOpacity="0.5" strokeLinejoin="round" />
       {pins.map((p, i) => (
-        <g key={i}>
-          <title>{`${p.label || "Municipio"} · riesgo ${String(p.riesgo || "").toLowerCase()}`}</title>
-          <circle cx={p.x} cy={p.y} r="7" fill={p.color} fillOpacity="0.16" />
-          <circle cx={p.x} cy={p.y} r="3.6" fill={p.color} stroke="white" strokeWidth="1.2" />
-        </g>
+        <circle key={i} cx={p.x} cy={p.y} r={denso ? (p.tendencia === "estable" ? 1.9 : 3) : 3.6}
+          fill={p.color} fillOpacity={denso && p.tendencia === "estable" ? 0.55 : 0.95}
+          stroke={denso ? "none" : "white"} strokeWidth="1.2">
+          <title>{`${p.municipio}, ${p.departamento}${p.cambio != null ? ` · cambio esperado ${p.cambio > 0 ? "+" : ""}${p.cambio} %` : ""}`}</title>
+        </circle>
       ))}
     </svg>
   );

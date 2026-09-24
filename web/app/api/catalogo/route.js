@@ -20,32 +20,26 @@ const FUENTES = [
   { id: "FAOSTAT-QCL", titulo: "Producción agrícola FAO Colombia",   entidad: "FAO/ONU",     uri: "https://fenixservices.fao.org/faostat/api/v1/en/data/QCL", tabla: "fact_produccion_fao",   estrategico: false },
 ];
 
-async function safeCount(query) {
-  try {
-    const { rows } = await pool.query(query);
-    return Number(rows[0].n) || 0;
-  } catch {
-    return null;
-  }
-}
-
+/* Dos consultas en total (qué tablas existen + un UNION ALL de conteos) en lugar
+   de un COUNT(*) por fuente, para no saturar el pool de conexiones.
+   Si la tabla no existe en la BD, filas = null. */
 export async function GET() {
-  const counts = await Promise.all([
-    safeCount("SELECT COUNT(*)::int AS n FROM fact_produccion_agricola"),
-    safeCount("SELECT COUNT(*)::int AS n FROM fact_precios_insumos"),
-    safeCount("SELECT COUNT(*)::int AS n FROM dim_estacion_ideam"),
-    safeCount("SELECT COUNT(*)::int AS n FROM fact_clima_mensual"),
-    safeCount("SELECT COUNT(*)::int AS n FROM fact_clima_mensual"),
-    safeCount("SELECT COUNT(*)::int AS n FROM dim_municipio"),
-    safeCount("SELECT COUNT(*)::int AS n FROM fact_aptitud_suelo"),
-    safeCount("SELECT COUNT(*)::int AS n FROM fact_precios_mayoristas"),
-    safeCount("SELECT COUNT(*)::int AS n FROM fact_alerta_enso"),
-    safeCount("SELECT COUNT(*)::int AS n FROM fact_tierras_ant"),
-    safeCount("SELECT COUNT(*)::int AS n FROM fact_credito_finagro"),
-    safeCount("SELECT COUNT(*)::int AS n FROM fact_clima_diario_nasa"),
-    safeCount("SELECT COUNT(*)::int AS n FROM fact_indicadores_wb"),
-    safeCount("SELECT COUNT(*)::int AS n FROM fact_produccion_fao"),
-  ]);
-
-  return Response.json(FUENTES.map((f, i) => ({ ...f, filas: counts[i] })));
+  const filas = new Map();
+  try {
+    const tablas = [...new Set(FUENTES.map((f) => f.tabla))];
+    const { rows: existentes } = await pool.query(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1)",
+      [tablas],
+    );
+    if (existentes.length) {
+      const sql = existentes
+        .map((r) => `SELECT '${r.table_name}' AS tabla, COUNT(*)::bigint AS n FROM public."${r.table_name}"`)
+        .join(" UNION ALL ");
+      const { rows } = await pool.query(sql);
+      rows.forEach((r) => filas.set(r.tabla, Number(r.n)));
+    }
+  } catch (err) {
+    console.error("[catalogo] DB error:", err.message);
+  }
+  return Response.json(FUENTES.map((f) => ({ ...f, filas: filas.has(f.tabla) ? filas.get(f.tabla) : null })));
 }

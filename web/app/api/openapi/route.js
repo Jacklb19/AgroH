@@ -1,144 +1,105 @@
+const q = (name, desc, required = false, type = "string") => ({ name, in: "query", required, description: desc, schema: { type } });
+const ok = (description) => ({ "200": { description }, "503": { description: "Base de datos no disponible" } });
+
 const SPEC = {
   openapi: "3.1.0",
   info: {
     title:       "AgroIA Colombia API",
-    description: "API pública sobre datos abiertos colombianos para inteligencia agroclimática. Predicciones XGBoost con SHAP, alertas IsolationForest, asistente Claude con tool-use.",
-    version:     "1.0.0",
-    contact:     { name: "AgroIA Colombia · Hackathon" },
+    description: "API pública sobre datos abiertos colombianos: pronósticos de rendimiento por municipio y cultivo (XGBoost validado con backtest), producción real, precios de insumos y asistente conversacional.",
+    version:     "2.0.0",
     license:     { name: "MIT" },
   },
   servers: [{ url: "/api", description: "Servidor actual" }],
   tags: [
-    { name: "Predicción", description: "Endpoints de inferencia y explicabilidad" },
-    { name: "Datos",      description: "Catálogo, mapa, dashboards" },
-    { name: "Asistente",  description: "Chat conversacional con Claude" },
+    { name: "Pronóstico", description: "Modelo de pronóstico de rendimiento (pred_pronostico)" },
+    { name: "Datos",      description: "Catálogo, producción, precios y clima" },
+    { name: "Asistente",  description: "Chat conversacional con herramientas SQL" },
     { name: "Sistema",    description: "Salud y metadatos" },
   ],
   paths: {
-    "/health": {
-      get: {
-        tags: ["Sistema"], summary: "Healthcheck",
-        responses: { "200": { description: "Servicio OK" } },
-      },
-    },
-    "/municipios": {
-      get: {
-        tags: ["Datos"], summary: "Lista de municipios disponibles",
-        responses: { "200": { description: "Array de strings 'Municipio, Departamento'" } },
-      },
-    },
+    "/health":     { get: { tags: ["Sistema"], summary: "Healthcheck de la base de datos", responses: ok("Servicio OK") } },
+    "/modelo":     { get: { tags: ["Pronóstico"], summary: "Versión activa del modelo, métricas de backtest, años pronosticados y fase ENSO actual", responses: ok("Metadatos del modelo") } },
+    "/resumen":    { get: { tags: ["Datos"], summary: "Cobertura: municipios, cultivos, combinaciones y años de producción", responses: ok("Cifras de cobertura") } },
+    "/municipios": { get: { tags: ["Datos"], summary: "Municipios con pronóstico", responses: ok("[{ id, nombre, departamento }]") } },
     "/cultivos": {
       get: {
-        tags: ["Datos"], summary: "Lista de cultivos en dim_cultivo",
-        responses: { "200": { description: "Array de strings" } },
-      },
-    },
-    "/mapa": {
-      get: {
-        tags: ["Datos"], summary: "Top 80 municipios con coordenadas y nivel de riesgo",
-        responses: { "200": { description: "{ fromDB, puntos: [{ municipio, departamento, lat, lon, riesgo }] }" } },
-      },
-    },
-    "/catalogo": {
-      get: {
-        tags: ["Datos"], summary: "Catálogo de fuentes datos.gov.co integradas",
-        responses: { "200": { description: "Array { id, titulo, entidad, uri, tabla, estrategico, filas }" } },
-      },
-    },
-    "/dashboards": {
-      get: {
-        tags: ["Datos"], summary: "Datos agregados para dashboards (modo offline)",
-        responses: { "200": { description: "Series, top municipios, alertas, anomalías" } },
-      },
-    },
-    "/impacto": {
-      get: {
-        tags: ["Datos"], summary: "KPIs reales calculados sobre el star schema",
-        responses: { "200": { description: "Cobertura, beneficiarios, alertas" } },
-      },
-    },
-    "/clima/actual": {
-      get: {
-        tags: ["Datos"], summary: "Clima en vivo del municipio (Open-Meteo)",
-        parameters: [{ name: "municipio", in: "query", required: true, schema: { type: "string" } }],
-        responses: { "200": { description: "Actual + pronóstico 3 días" } },
+        tags: ["Datos"], summary: "Cultivos con pronóstico (opcionalmente solo los de un municipio)",
+        parameters: [q("muni", "Código DIVIPOLA del municipio")],
+        responses: ok("[{ id, nombre, ciclo }]"),
       },
     },
     "/prediccion": {
       post: {
-        tags: ["Predicción"], summary: "Predicción XGBoost con SHAP",
+        tags: ["Pronóstico"], summary: "Pronóstico para municipio × cultivo × año, con escenarios, historia real y explicación",
         requestBody: {
           required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  muni:     { type: "string" },
-                  cultivo:  { type: "string" },
-                  year:     { type: "string" },
-                  semester: { type: "string", enum: ["A", "B"] },
-                  enso:     { type: "string", enum: ["Neutral", "El Niño", "La Niña"] },
-                  lluvia:   { type: "string", enum: ["Normal", "Déficit", "Exceso"] },
-                },
-                required: ["muni", "cultivo"],
-              },
-            },
-          },
+          content: { "application/json": { schema: {
+            type: "object",
+            properties: { id_municipio: { type: "string" }, id_cultivo: { type: "integer" }, anio: { type: "integer" } },
+            required: ["id_municipio", "id_cultivo", "anio"],
+          } } },
         },
-        responses: { "200": { description: "yhat, low, high, risk, shap[]" } },
+        responses: ok("{ yhat, low, high, escenarios[], historia[], shap[], variabilidad, precision_cultivo } o { sin_datos: true }"),
       },
     },
     "/comparativo": {
       get: {
-        tags: ["Predicción"], summary: "Rendimiento predicho del mismo cultivo en otros municipios del departamento",
-        parameters: [
-          { name: "muni",    in: "query", required: true, schema: { type: "string" }, description: "'Municipio, Departamento'" },
-          { name: "cultivo", in: "query", required: true, schema: { type: "string" } },
-        ],
-        responses: { "200": { description: "{ fromDB, departamento, filas: [{ municipio, rendimiento, riesgo, vs_hist_pct, actual }] }" } },
+        tags: ["Pronóstico"], summary: "Pronóstico del mismo cultivo en los municipios del departamento",
+        parameters: [q("muni", "Código DIVIPOLA", true), q("cultivo", "id_cultivo", true, "integer"), q("anio", "Año", true, "integer")],
+        responses: ok("{ departamento, total, posicion, filas[] }"),
+      },
+    },
+    "/cultivo": {
+      get: {
+        tags: ["Pronóstico"], summary: "Sin id: cultivos principales. Con id: serie nacional (real, backtest, pronóstico), mejores municipios y cambios",
+        parameters: [q("id", "id_cultivo", false, "integer"), q("anio", "Año del pronóstico", false, "integer")],
+        responses: ok("{ serie[], top[], cambios }"),
+      },
+    },
+    "/mapa": {
+      get: {
+        tags: ["Pronóstico"], summary: "Cambio esperado por municipio frente a su último año registrado",
+        parameters: [q("anio", "Año del pronóstico", false, "integer")],
+        responses: ok("{ puntos[{ municipio, lat, lon, cambio, tendencia }], resumen }"),
       },
     },
     "/recomendacion": {
       post: {
-        tags: ["Predicción"], summary: "Recomendación accionable (calendario + dosis + plagas + agua)",
+        tags: ["Pronóstico"], summary: "Recomendaciones: ventana de siembra, aptitud del suelo (UPRA) y fase ENSO (NOAA)",
         requestBody: {
           required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  muni:    { type: "string" },
-                  cultivo: { type: "string" },
-                  enso:    { type: "string" },
-                  lluvia:  { type: "string" },
-                },
-                required: ["muni", "cultivo"],
-              },
-            },
-          },
+          content: { "application/json": { schema: {
+            type: "object",
+            properties: { id_municipio: { type: "string" }, id_cultivo: { type: "integer" }, semestre: { type: "string", enum: ["A", "B"] } },
+            required: ["id_municipio", "id_cultivo"],
+          } } },
         },
-        responses: { "200": { description: "4 recomendaciones agronómicas" } },
+        responses: ok("{ recomendaciones[] }"),
+      },
+    },
+    "/simular": { post: { tags: ["Pronóstico"], summary: "Simulación orientativa de escenarios con elasticidades agronómicas típicas", responses: ok("{ baseline, proyectado, contribuciones[] }") } },
+    "/economia": { get: { tags: ["Datos"], summary: "Índice de precios de insumos (IPIA) y precios mayoristas SIPSA", responses: ok("{ indice[], insumos[], mayoristas }") } },
+    "/catalogo": { get: { tags: ["Datos"], summary: "Catálogo de fuentes abiertas y registros cargados", responses: ok("[{ id, titulo, entidad, uri, estrategico, filas }]") } },
+    "/clima/actual": {
+      get: {
+        tags: ["Datos"], summary: "Clima en vivo del municipio (Open-Meteo)",
+        parameters: [q("id", "Código DIVIPOLA"), q("municipio", "Nombre (alternativa a id)")],
+        responses: ok("Actual + pronóstico 3 días"),
       },
     },
     "/chat": {
       post: {
-        tags: ["Asistente"], summary: "Chat con Claude (tool-use SQL); modelo configurable con ANTHROPIC_MODEL",
+        tags: ["Asistente"], summary: "Chat con Claude o Groq (herramientas SQL sobre la BD)",
         requestBody: {
           required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  messages:   { type: "array", items: { type: "object", properties: { role: { type: "string" }, content: { type: "string" } } } },
-                  sessionId:  { type: "string", description: "UUID opcional para persistir la conversación" },
-                },
-                required: ["messages"],
-              },
+          content: { "application/json": { schema: {
+            type: "object",
+            properties: {
+              messages:  { type: "array", items: { type: "object", properties: { role: { type: "string" }, content: { type: "string" } } } },
+              sessionId: { type: "string", description: "UUID opcional para persistir la conversación" },
             },
-          },
+            required: ["messages"],
+          } } },
         },
         responses: { "200": { description: "{ reply, sessionId }" } },
       },

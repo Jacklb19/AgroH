@@ -1,4 +1,5 @@
 import pool from "@/lib/db";
+import { VERSION_ACTIVA, RENDIMIENTO_REAL } from "@/lib/modelo";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const GROQ_URL      = "https://api.groq.com/openai/v1/chat/completions";
@@ -27,14 +28,16 @@ Guía rápida — qué herramienta usar:
 - "panorama", "resumen", "cuántos municipios", "estadísticas" → resumen_general
 - "clima", "lluvia", "temperatura en X" → buscar_clima(municipio=X)
 - "compara A y B", "cuál es mejor entre X y Y" → comparar_municipios(municipios=[A,B])
-- "qué pasa si hay El Niño/La Niña", "escenario de sequía", "simulación" → proyectar_escenario(municipio, cultivo, enso, lluvia)
+- "qué pasa si hay El Niño/La Niña", "escenario de sequía", "simulación" → proyectar_escenario(municipio, cultivo)
 - "qué sembrar en X", "qué cultivo me recomiendas" → recomendar_cultivo(municipio=X)
 
 La base de datos contiene:
-- Predicciones XGBoost (R²=0.81, MAE=0.18 t/ha) por municipio y cultivo
-- Alertas climáticas: sequía, exceso lluvia, plagas, volatilidad de mercado
-- Datos históricos de producción y clima mensual
-- Índices ENSO por período
+- Pronósticos de rendimiento (modelo XGBoost validado con 2022-2024) por municipio, cultivo y año (2025-2027), con rango probable del 90 % y escenarios Neutral / El Niño / La Niña
+- Producción agrícola real 2019-2024 (Encuesta Agropecuaria EVA); el rendimiento es producción ÷ área cosechada
+- Clasificación histórica de riesgo ENSO por municipio (2019-2024, modelo experimental; no son alertas vigentes)
+- Clima mensual de estaciones del IDEAM (unos 120 municipios) e índice ENSO (NOAA)
+
+Con los datos de 2019 a 2024 el modelo casi no encuentra diferencias entre escenarios de El Niño y La Niña; si las cifras de los escenarios son parecidas, dilo así.
 
 FORMATO DE RESPUESTA — MUY IMPORTANTE:
 Habla como un asesor agrícola amigable, NO como un sistema técnico. Tu audiencia son agricultores y personas sin formación técnica.
@@ -43,23 +46,22 @@ Reglas de lenguaje:
 - NUNCA uses "t/ha" solo — siempre explícalo: "73 toneladas por hectárea" o "73 t/ha (toneladas cosechadas por cada hectárea sembrada)"
 - NUNCA digas "intervalo de confianza" — di en cambio: "la cosecha podría estar entre X y Y toneladas por hectárea"
 - NUNCA digas "semestre B" sin aclarar: "segundo semestre (julio–diciembre)"
-- Para nivel de riesgo usa lenguaje claro:
-  - ALTO → "⚠️ Riesgo alto — se recomiendan precauciones urgentes"
-  - MEDIO → "🟡 Riesgo moderado — hay factores a vigilar"
-  - BAJO → "✅ Riesgo bajo — condiciones favorables"
+- Si mencionas riesgo climático histórico (herramienta listar_alertas), aclara que es una clasificación de 2019-2024, no una alerta vigente.
+- NUNCA afirmes que "no hay riesgo" o que "las condiciones son favorables" si no consultaste datos que lo respalden.
+- Los rendimientos solo son comparables dentro de un mismo cultivo (el tomate rinde mucho más que el café por naturaleza).
+- Usa SOLO cifras, rangos, años y clasificaciones que aparezcan en los resultados de las herramientas. Si un dato no está (por ejemplo, la aptitud del suelo), no lo menciones o di que no está disponible.
+- Menciona siempre el año al que corresponde cada dato.
 
 Estructura cada respuesta así:
-1. Línea de título con emoji y dato principal (ej: "🥔 Papa en Pasto — buena cosecha esperada")
-2. El dato clave en lenguaje simple (sin jerga)
-3. Qué significa en la práctica (1-2 frases: "Esto equivale a...", "En términos prácticos...")
-4. La situación de riesgo en lenguaje cotidiano
-5. Una recomendación corta si aplica
+1. Línea de título con emoji y dato principal (ej: "🥔 Papa en Pasto — cosecha estable")
+2. El dato clave en lenguaje simple (sin jerga), con su rango probable si lo hay
+3. Qué significa en la práctica (1-2 frases)
+4. Una recomendación corta si aplica
 
 Usa emojis con moderación para hacer la lectura más visual (🌱 cultivos, 🏔️ municipios, ☔ lluvia, 🌡️ temperatura, ⚠️ alertas, 📈 buen rendimiento, 📉 bajo rendimiento).
 
 CUANDO LA HERRAMIENTA FALLA O DEVUELVE DATOS VACÍOS:
-Responde usando tu conocimiento agrícola sobre Colombia. Usa el mismo formato (título con emoji, dato clave, contexto práctico, recomendación). Sé concreto: da cifras reales de producción colombiana, municipios conocidos, temporadas típicas.
-NUNCA menciones errores, problemas de base de datos ni que no tienes información. Siempre da una respuesta completa y útil.`;
+Dilo con claridad y en lenguaje sencillo (por ejemplo: "No tengo datos de ese cultivo en ese municipio"). Puedes añadir orientación general sobre el cultivo en Colombia, pero márcala como conocimiento general y NUNCA inventes cifras de rendimiento, municipios o fechas como si vinieran de la base de datos.`;
 
 /* Tools en formato Anthropic: { name, description, input_schema } */
 const TOOLS = [
@@ -76,7 +78,7 @@ const TOOLS = [
   },
   {
     name: "listar_alertas",
-    description: "Lista alertas climáticas activas filtradas por nivel de riesgo o municipio. Úsala cuando pregunten por riesgos, alertas o zonas peligrosas.",
+    description: "Clasificación histórica (2019-2024) de riesgo climático ENSO por municipio, de un modelo experimental. Úsala cuando pregunten por riesgos o zonas peligrosas, y aclara que no son alertas vigentes.",
     input_schema: {
       type: "object",
       properties: {
@@ -128,14 +130,13 @@ const TOOLS = [
   },
   {
     name: "proyectar_escenario",
-    description: "Proyecta el rendimiento ajustado por un escenario climático (ENSO + régimen de lluvia). Úsala cuando pregunten '¿qué pasa si hay El Niño?', 'qué pasa con sequía', 'simulación' o 'escenario'.",
+    description: "Pronóstico del modelo para un municipio y cultivo en los tres escenarios (año normal, El Niño, La Niña). Úsala cuando pregunten '¿qué pasa si hay El Niño?', 'qué pasa con sequía', 'simulación' o 'escenario'.",
     input_schema: {
       type: "object",
       properties: {
         municipio: { type: "string", description: "Municipio objetivo" },
         cultivo:   { type: "string", description: "Cultivo objetivo" },
-        enso:      { type: "string", enum: ["Neutral", "El Niño", "La Niña"], description: "Fase ENSO" },
-        lluvia:    { type: "string", enum: ["Normal", "Déficit", "Exceso"],    description: "Régimen de lluvias" },
+        anio:      { type: "string", description: "Año de cosecha (por defecto el año en curso)" },
       },
       required: ["municipio", "cultivo"],
     },
@@ -165,6 +166,24 @@ const OPENAI_TOOLS = TOOLS.map((t) => ({
   },
 }));
 
+/* Comparación de nombres insensible a mayúsculas y tildes (sin extensión unaccent). */
+const SIN_TILDES = (col) => `translate(lower(${col}), 'áéíóúüñ', 'aeiouun')`;
+const patron = (txt) => `%${String(txt || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")}%`;
+const ANIO_ACTUAL = () => new Date().getFullYear();
+const normalizar = (txt) => String(txt || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+/* "papa" debe ser Papa y no Papaya: primero coincidencia exacta, luego el nombre más corto que la contenga. */
+async function resolverCultivo(txt) {
+  if (!txt) return null;
+  const { rows } = await pool.query(`
+    SELECT id_cultivo FROM dim_cultivo
+    WHERE ${SIN_TILDES("nombre_cultivo")} LIKE $1
+    ORDER BY (${SIN_TILDES("nombre_cultivo")} = $2) DESC, LENGTH(nombre_cultivo)
+    LIMIT 1
+  `, [patron(txt), normalizar(txt)]);
+  return rows[0]?.id_cultivo ?? -1;
+}
+
 /* ── Ejecutores SQL ──────────────────────────────────────────────────── */
 async function ejecutarHerramienta(name, args, intento = 0) {
   try {
@@ -172,34 +191,30 @@ async function ejecutarHerramienta(name, args, intento = 0) {
 
       case "buscar_prediccion": {
         const conds = [], params = [];
-        if (args.municipio) { params.push(`%${args.municipio}%`); conds.push(`m.nombre_municipio ILIKE $${params.length}`); }
-        if (args.cultivo)   { params.push(`%${args.cultivo}%`);   conds.push(`c.nombre_cultivo   ILIKE $${params.length}`); }
-        const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+        if (args.municipio) { params.push(patron(args.municipio)); conds.push(`${SIN_TILDES("m.nombre_municipio")} LIKE $${params.length}`); }
+        if (args.cultivo)   { params.push(await resolverCultivo(args.cultivo)); conds.push(`c.id_cultivo = $${params.length}`); }
+        params.push(ANIO_ACTUAL());
         const { rows } = await pool.query(`
-          SELECT m.nombre_municipio, m.nombre_departamento, c.nombre_cultivo,
-                 t.anio, t.semestre,
-                 ROUND(pr.rendimiento_predicho_t_ha::numeric, 2)   AS rendimiento_t_ha,
-                 ROUND(pr.intervalo_confianza_inferior::numeric, 2) AS ci_inferior,
-                 ROUND(pr.intervalo_confianza_superior::numeric, 2) AS ci_superior,
-                 pa.nivel_riesgo
-          FROM pred_rendimiento pr
-          JOIN dim_municipio m ON pr.id_municipio = m.id_municipio
-          JOIN dim_cultivo   c ON pr.id_cultivo   = c.id_cultivo
-          LEFT JOIN dim_tiempo t ON pr.id_tiempo  = t.id_tiempo
-          LEFT JOIN pred_alerta_climatica pa
-            ON pa.id_municipio = pr.id_municipio AND pa.id_tiempo = pr.id_tiempo
-          ${where}
-          ORDER BY t.anio DESC NULLS LAST, t.mes DESC NULLS LAST LIMIT 8
+          SELECT m.nombre_municipio, m.nombre_departamento, c.nombre_cultivo, p.anio,
+                 ROUND(p.rendimiento_predicho::numeric, 2) AS rendimiento_esperado_t_ha,
+                 ROUND(p.limite_inferior::numeric, 2)      AS rango_bajo,
+                 ROUND(p.limite_superior::numeric, 2)      AS rango_alto
+          FROM pred_pronostico p
+          JOIN dim_municipio m ON m.id_municipio = p.id_municipio
+          JOIN dim_cultivo   c ON c.id_cultivo   = p.id_cultivo
+          WHERE p.id_version = ${VERSION_ACTIVA} AND p.tipo = 'pronostico' AND p.escenario = 'Neutral'
+            AND p.anio = $${params.length} ${conds.length ? "AND " + conds.join(" AND ") : ""}
+          ORDER BY p.rendimiento_predicho DESC LIMIT 8
         `, params);
         return rows.length
-          ? { predicciones: rows, total: rows.length }
-          : { sin_datos: true, mensaje: "No hay predicciones registradas para esa combinación." };
+          ? { pronosticos: rows, total: rows.length, nota: "Rango = entre dónde quedó el valor real 9 de cada 10 veces en años de prueba." }
+          : { sin_datos: true, mensaje: "No hay pronóstico para esa combinación de municipio y cultivo." };
       }
 
       case "listar_alertas": {
         const conds = [], params = [];
         if (args.nivel_riesgo) { params.push(args.nivel_riesgo);     conds.push(`pa.nivel_riesgo = $${params.length}`); }
-        if (args.municipio)    { params.push(`%${args.municipio}%`); conds.push(`m.nombre_municipio ILIKE $${params.length}`); }
+        if (args.municipio)    { params.push(patron(args.municipio)); conds.push(`${SIN_TILDES("m.nombre_municipio")} LIKE $${params.length}`); }
         const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
         params.push(parseInt(args.limite) || 8);
         const { rows } = await pool.query(`
@@ -214,65 +229,102 @@ async function ejecutarHerramienta(name, args, intento = 0) {
           ORDER BY pa.score_probabilidad DESC LIMIT $${params.length}
         `, params);
         return rows.length
-          ? { alertas: rows, total: rows.length }
+          ? { alertas: rows, total: rows.length, nota: "Clasificación histórica (2019-2024) de un modelo experimental de riesgo ENSO; no son alertas vigentes." }
           : { sin_datos: true, mensaje: "No hay alertas registradas con esos filtros." };
       }
 
       case "top_rendimiento": {
-        const params = [];
+        const params = [ANIO_ACTUAL()];
         let cultivoWhere = "";
-        if (args.cultivo) { params.push(`%${args.cultivo}%`); cultivoWhere = "WHERE c.nombre_cultivo ILIKE $1"; }
+        if (args.cultivo) { params.push(await resolverCultivo(args.cultivo)); cultivoWhere = "AND c.id_cultivo = $2"; }
         params.push(parseInt(args.limite) || 5);
         const orden = args.orden === "ASC" ? "ASC" : "DESC";
+        /* Se excluyen valores por encima del percentil 95 del cultivo (suelen ser errores de reporte). */
         const { rows } = await pool.query(`
-          SELECT m.nombre_municipio, m.nombre_departamento, c.nombre_cultivo,
-                 ROUND(AVG(pr.rendimiento_predicho_t_ha)::numeric, 2) AS rendimiento_promedio_t_ha,
-                 COUNT(*)::int AS num_predicciones
-          FROM pred_rendimiento pr
-          JOIN dim_municipio m ON pr.id_municipio = m.id_municipio
-          JOIN dim_cultivo   c ON pr.id_cultivo   = c.id_cultivo
-          ${cultivoWhere}
-          GROUP BY m.nombre_municipio, m.nombre_departamento, c.nombre_cultivo
-          ORDER BY rendimiento_promedio_t_ha ${orden}
+          WITH lim AS (
+            SELECT f.id_cultivo, PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ${RENDIMIENTO_REAL}) AS p95
+            FROM fact_produccion_agricola f WHERE ${RENDIMIENTO_REAL} IS NOT NULL GROUP BY f.id_cultivo
+          )
+          SELECT m.nombre_municipio, m.nombre_departamento, c.nombre_cultivo, p.anio,
+                 ROUND(p.rendimiento_predicho::numeric, 2) AS rendimiento_esperado_t_ha
+          FROM pred_pronostico p
+          JOIN dim_municipio m ON m.id_municipio = p.id_municipio
+          JOIN dim_cultivo   c ON c.id_cultivo   = p.id_cultivo
+          JOIN lim ON lim.id_cultivo = p.id_cultivo
+          WHERE p.id_version = ${VERSION_ACTIVA} AND p.tipo = 'pronostico' AND p.escenario = 'Neutral'
+            AND p.anio = $1 AND p.rendimiento_predicho <= lim.p95 ${cultivoWhere}
+          ORDER BY p.rendimiento_predicho ${orden}
           LIMIT $${params.length}
         `, params);
         return rows.length
-          ? { ranking: rows }
-          : { sin_datos: true, mensaje: "No hay datos de rendimiento para ese cultivo en la base de datos." };
+          ? { ranking: rows, nota: "Comparar rendimientos solo tiene sentido dentro de un mismo cultivo. Se excluyen valores atípicos (por encima del 95 % de lo registrado para el cultivo)." }
+          : { sin_datos: true, mensaje: "No hay pronósticos para ese cultivo." };
       }
 
       case "resumen_general": {
-        const [munis, cults, rend, alertas, alto] = await Promise.all([
-          pool.query("SELECT COUNT(*)::int AS total FROM dim_municipio"),
-          pool.query("SELECT COUNT(*)::int AS total FROM dim_cultivo"),
-          pool.query("SELECT ROUND(AVG(rendimiento_predicho_t_ha)::numeric,2) AS promedio FROM pred_rendimiento"),
-          pool.query("SELECT COUNT(*)::int AS total FROM pred_alerta_climatica"),
-          pool.query("SELECT COUNT(*)::int AS total FROM pred_alerta_climatica WHERE nivel_riesgo='ALTO'"),
-        ]);
-        return {
-          municipios_cubiertos:  munis.rows[0].total,
-          cultivos_monitoreados: cults.rows[0].total,
-          rendimiento_promedio:  parseFloat(rend.rows[0].promedio),
-          total_alertas:         alertas.rows[0].total,
-          alertas_riesgo_alto:   alto.rows[0].total,
-        };
+        const { rows } = await pool.query(`
+          SELECT
+            (SELECT COUNT(DISTINCT id_municipio)::int FROM pred_pronostico WHERE id_version = ${VERSION_ACTIVA}) AS municipios_con_pronostico,
+            (SELECT COUNT(DISTINCT id_cultivo)::int   FROM pred_pronostico WHERE id_version = ${VERSION_ACTIVA}) AS cultivos,
+            (SELECT COUNT(DISTINCT (id_municipio, id_cultivo))::int FROM pred_pronostico WHERE id_version = ${VERSION_ACTIVA}) AS combinaciones,
+            (SELECT metricas_json->'modelo' FROM model_version WHERE id_version = ${VERSION_ACTIVA}) AS precision_modelo,
+            (SELECT MIN(t.anio) || '-' || MAX(t.anio) FROM fact_produccion_agricola f JOIN dim_tiempo t ON t.id_tiempo = f.id_tiempo) AS anios_produccion
+        `);
+        return { ...rows[0], nota: "precision_modelo: r2 y error_relativo_mediano medidos en 2022-2024 con años no vistos por el modelo." };
       }
 
       case "buscar_clima": {
-        const { rows } = await pool.query(`
-          SELECT m.nombre_municipio, m.nombre_departamento, t.anio, t.mes,
-                 ROUND(fc.precipitacion_mm::numeric, 1)  AS precipitacion_mm,
-                 ROUND(fc.temperatura_max_c::numeric, 1)  AS temp_max_c,
-                 ROUND(fc.temperatura_min_c::numeric, 1)  AS temp_min_c
+        const { rows: muni } = await pool.query(`
+          SELECT nombre_municipio, nombre_departamento, latitud_centroide AS lat, longitud_centroide AS lon
+          FROM dim_municipio WHERE ${SIN_TILDES("nombre_municipio")} LIKE $1 AND latitud_centroide IS NOT NULL
+          ORDER BY LENGTH(nombre_municipio) LIMIT 1
+        `, [patron(args.municipio)]);
+        if (!muni.length) return { sin_datos: true, mensaje: "No encontré ese municipio." };
+        const m = muni[0];
+
+        let actual = null;
+        try {
+          const q = new URLSearchParams({
+            latitude: String(m.lat), longitude: String(m.lon), timezone: "America/Bogota", forecast_days: "3",
+            current: "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m",
+            daily: "temperature_2m_max,temperature_2m_min,precipitation_sum",
+          });
+          const r = await fetch(`https://api.open-meteo.com/v1/forecast?${q}`, { cache: "no-store" });
+          if (r.ok) {
+            const om = await r.json();
+            actual = {
+              fuente: "Open-Meteo (en vivo)",
+              hora: om.current?.time,
+              temperatura_c: om.current?.temperature_2m,
+              humedad_pct: om.current?.relative_humidity_2m,
+              lluvia_mm: om.current?.precipitation,
+              viento_kmh: om.current?.wind_speed_10m,
+              pronostico_3_dias: (om.daily?.time || []).map((f, i) => ({
+                fecha: f, max_c: om.daily.temperature_2m_max?.[i], min_c: om.daily.temperature_2m_min?.[i], lluvia_mm: om.daily.precipitation_sum?.[i],
+              })),
+            };
+          }
+        } catch (e) {
+          console.warn("[chat:clima] Open-Meteo:", e.message);
+        }
+
+        const { rows: hist } = await pool.query(`
+          SELECT t.anio, t.mes, ROUND(fc.precipitacion_mm::numeric, 1) AS precipitacion_mm
           FROM fact_clima_mensual fc
           JOIN dim_municipio m ON fc.id_municipio = m.id_municipio
-          LEFT JOIN dim_tiempo t ON fc.id_tiempo  = t.id_tiempo
-          WHERE m.nombre_municipio ILIKE $1
-          ORDER BY t.anio DESC NULLS LAST, t.mes DESC NULLS LAST LIMIT 12
-        `, [`%${args.municipio}%`]);
-        return rows.length
-          ? { registros_climaticos: rows, total: rows.length }
-          : { sin_datos: true, mensaje: "No hay registros climáticos para ese municipio." };
+          JOIN dim_tiempo t ON fc.id_tiempo = t.id_tiempo
+          WHERE ${SIN_TILDES("m.nombre_municipio")} LIKE $1
+          ORDER BY t.anio DESC, t.mes DESC LIMIT 6
+        `, [patron(args.municipio)]);
+
+        return {
+          municipio: m.nombre_municipio, departamento: m.nombre_departamento,
+          clima_actual: actual,
+          historico_ideam: hist,
+          nota: hist.length
+            ? `El histórico de estaciones IDEAM llega hasta ${hist[0].mes}/${hist[0].anio}; no lo presentes como clima actual.`
+            : "No hay histórico de estaciones IDEAM para este municipio.",
+        };
       }
 
       case "comparar_municipios": {
@@ -280,82 +332,82 @@ async function ejecutarHerramienta(name, args, intento = 0) {
         if (munis.length < 2) {
           return { sin_datos: true, mensaje: "Se necesitan al menos 2 municipios para comparar." };
         }
-        const params  = munis.map((m) => `%${m}%`);
-        const ilike   = munis.map((_, i) => `m.nombre_municipio ILIKE $${i + 1}`).join(" OR ");
+        const params = munis.map(patron);
+        const like   = munis.map((_, i) => `${SIN_TILDES("m.nombre_municipio")} LIKE $${i + 1}`).join(" OR ");
         let cultivoSQL = "";
-        if (args.cultivo) { params.push(`%${args.cultivo}%`); cultivoSQL = `AND c.nombre_cultivo ILIKE $${params.length}`; }
+        if (args.cultivo) { params.push(await resolverCultivo(args.cultivo)); cultivoSQL = `AND c.id_cultivo = $${params.length}`; }
+        params.push(ANIO_ACTUAL());
         const { rows } = await pool.query(`
-          SELECT m.nombre_municipio,
-                 m.nombre_departamento,
-                 ROUND(AVG(pr.rendimiento_predicho_t_ha)::numeric, 2) AS rendimiento_promedio,
-                 COUNT(DISTINCT pr.id_cultivo)::int                   AS cultivos_cubiertos,
-                 COUNT(DISTINCT pa.id) FILTER (
-                   WHERE pa.activa = TRUE AND pa.nivel_riesgo = 'ALTO'
-                 )::int                                               AS alertas_alto
-          FROM dim_municipio m
-          LEFT JOIN pred_rendimiento     pr ON pr.id_municipio = m.id_municipio
-          LEFT JOIN dim_cultivo          c  ON c.id_cultivo    = pr.id_cultivo
-          LEFT JOIN pred_alerta_climatica pa ON pa.id_municipio = m.id_municipio
-          WHERE (${ilike}) ${cultivoSQL}
-          GROUP BY m.nombre_municipio, m.nombre_departamento
-          ORDER BY rendimiento_promedio DESC NULLS LAST
+          SELECT m.nombre_municipio, m.nombre_departamento, c.nombre_cultivo,
+                 ROUND(p.rendimiento_predicho::numeric, 2) AS rendimiento_esperado_t_ha,
+                 ROUND(p.limite_inferior::numeric, 2) AS rango_bajo,
+                 ROUND(p.limite_superior::numeric, 2) AS rango_alto
+          FROM pred_pronostico p
+          JOIN dim_municipio m ON m.id_municipio = p.id_municipio
+          JOIN dim_cultivo   c ON c.id_cultivo   = p.id_cultivo
+          WHERE p.id_version = ${VERSION_ACTIVA} AND p.tipo = 'pronostico' AND p.escenario = 'Neutral'
+            AND p.anio = $${params.length} AND (${like}) ${cultivoSQL}
+          ORDER BY c.nombre_cultivo, p.rendimiento_predicho DESC
+          LIMIT 40
         `, params);
         return rows.length
-          ? { comparacion: rows, total: rows.length }
-          : { sin_datos: true, mensaje: "No encontré datos para esos municipios." };
+          ? { comparacion: rows, total: rows.length, nota: "Compara municipios dentro de un mismo cultivo." }
+          : { sin_datos: true, mensaje: "No encontré pronósticos para esos municipios." };
       }
 
       case "proyectar_escenario": {
-        const ensoAdj   = args.enso   === "El Niño"  ? -0.5 : args.enso   === "La Niña" ? 0.3  : 0;
-        const lluviaAdj = args.lluvia === "Déficit"  ? -0.4 : args.lluvia === "Exceso"  ? -0.2 : 0;
+        const anio = parseInt(args.anio, 10) || ANIO_ACTUAL();
         const { rows } = await pool.query(`
-          SELECT m.nombre_municipio, c.nombre_cultivo,
-                 ROUND(pr.rendimiento_predicho_t_ha::numeric, 2) AS rendimiento_base
-          FROM pred_rendimiento pr
-          JOIN dim_municipio m ON pr.id_municipio = m.id_municipio
-          JOIN dim_cultivo   c ON pr.id_cultivo   = c.id_cultivo
-          LEFT JOIN dim_tiempo t ON pr.id_tiempo  = t.id_tiempo
-          WHERE m.nombre_municipio ILIKE $1
-            AND c.nombre_cultivo   ILIKE $2
-          ORDER BY t.anio DESC NULLS LAST, t.mes DESC NULLS LAST LIMIT 1
-        `, [`%${args.municipio}%`, `%${args.cultivo}%`]);
-        if (!rows.length) return { sin_datos: true, mensaje: "Sin línea base para esa combinación municipio-cultivo." };
-        const base   = parseFloat(rows[0].rendimiento_base);
-        const ajuste = ensoAdj + lluviaAdj;
-        return {
-          municipio:           rows[0].nombre_municipio,
-          cultivo:             rows[0].nombre_cultivo,
-          escenario:           { enso: args.enso || "Neutral", lluvia: args.lluvia || "Normal" },
-          rendimiento_base:    base,
-          rendimiento_proyectado: +(base + ajuste).toFixed(2),
-          impacto_t_ha:        +ajuste.toFixed(2),
-          impacto_pct:         +((ajuste / base) * 100).toFixed(1),
-          interpretacion:      ajuste > 0
-            ? "El escenario favorece la cosecha frente a la línea base."
-            : ajuste < 0
-              ? "El escenario reduce el rendimiento esperado; conviene tomar medidas preventivas."
-              : "Escenario neutro: rendimiento esperado se mantiene en la línea base.",
-        };
+          SELECT m.nombre_municipio, c.nombre_cultivo, p.escenario,
+                 ROUND(p.rendimiento_predicho::numeric, 2) AS rendimiento_esperado_t_ha,
+                 ROUND(p.limite_inferior::numeric, 2) AS rango_bajo,
+                 ROUND(p.limite_superior::numeric, 2) AS rango_alto
+          FROM pred_pronostico p
+          JOIN dim_municipio m ON m.id_municipio = p.id_municipio
+          JOIN dim_cultivo   c ON c.id_cultivo   = p.id_cultivo
+          WHERE p.id_version = ${VERSION_ACTIVA} AND p.tipo = 'pronostico' AND p.anio = $3
+            AND ${SIN_TILDES("m.nombre_municipio")} LIKE $1
+            AND c.id_cultivo = $2
+          ORDER BY m.nombre_municipio, p.escenario
+        `, [patron(args.municipio), await resolverCultivo(args.cultivo), anio]);
+        if (!rows.length) return { sin_datos: true, mensaje: "No hay pronóstico para esa combinación municipio-cultivo." };
+        return { anio, escenarios: rows };
       }
 
       case "recomendar_cultivo": {
-        const limite = parseInt(args.limite) || 3;
+        const limite = parseInt(args.limite) || 5;
         const { rows } = await pool.query(`
-          SELECT c.nombre_cultivo,
-                 ROUND(AVG(pr.rendimiento_predicho_t_ha)::numeric, 2) AS rendimiento_promedio,
-                 ROUND(STDDEV(pr.rendimiento_predicho_t_ha)::numeric, 2) AS rendimiento_std,
-                 COUNT(*)::int AS num_predicciones
-          FROM pred_rendimiento pr
-          JOIN dim_municipio m ON pr.id_municipio = m.id_municipio
-          JOIN dim_cultivo   c ON pr.id_cultivo   = c.id_cultivo
-          WHERE m.nombre_municipio ILIKE $1
-          GROUP BY c.nombre_cultivo
-          ORDER BY rendimiento_promedio DESC NULLS LAST
+          WITH hist AS (
+            SELECT f.id_municipio, f.id_cultivo,
+                   AVG(${RENDIMIENTO_REAL}) AS promedio, STDDEV(${RENDIMIENTO_REAL}) AS desviacion,
+                   SUM(f.area_cosechada_ha) AS area_total
+            FROM fact_produccion_agricola f
+            GROUP BY f.id_municipio, f.id_cultivo
+          )
+          SELECT c.nombre_cultivo, c.tipo_ciclo,
+                 ROUND(h.area_total::numeric) AS hectareas_cosechadas_2019_2024,
+                 ROUND(h.promedio::numeric, 2) AS rendimiento_promedio_t_ha,
+                 ROUND((h.desviacion / NULLIF(h.promedio, 0) * 100)::numeric) AS variabilidad_pct,
+                 ROUND(p.rendimiento_predicho::numeric, 2) AS pronostico_t_ha,
+                 ROUND(p.limite_inferior::numeric, 2) AS pronostico_rango_bajo,
+                 ROUND(p.limite_superior::numeric, 2) AS pronostico_rango_alto,
+                 p.anio AS anio_pronostico,
+                 COALESCE(a.clase_aptitud, 'sin dato') AS aptitud_suelo_upra
+          FROM hist h
+          JOIN dim_municipio m ON m.id_municipio = h.id_municipio
+          JOIN dim_cultivo   c ON c.id_cultivo   = h.id_cultivo
+          LEFT JOIN pred_pronostico p
+            ON p.id_version = ${VERSION_ACTIVA} AND p.tipo = 'pronostico' AND p.escenario = 'Neutral'
+           AND p.anio = $3 AND p.id_municipio = h.id_municipio AND p.id_cultivo = h.id_cultivo
+          LEFT JOIN fact_aptitud_suelo a ON a.id_municipio = h.id_municipio AND a.id_cultivo = h.id_cultivo
+          WHERE ${SIN_TILDES("m.nombre_municipio")} LIKE $1
+          ORDER BY h.area_total DESC NULLS LAST
           LIMIT $2
-        `, [`%${args.municipio}%`, limite]);
+        `, [patron(args.municipio), limite, ANIO_ACTUAL()]);
         return rows.length
-          ? { municipio: args.municipio, recomendaciones: rows, total: rows.length }
-          : { sin_datos: true, mensaje: "No hay predicciones registradas en ese municipio." };
+          ? { municipio: args.municipio, cultivos_principales: rows, total: rows.length,
+              nota: "Ordenados por área cosechada (lo que más se siembra allí). Variabilidad = qué tanto cambia el rendimiento año a año. No recomiendes un cultivo por tener más t/ha que otro: cada cultivo tiene su escala. Recomienda según lo que más se siembra, la estabilidad y la aptitud del suelo (si hay dato)." }
+          : { sin_datos: true, mensaje: "No hay registros de producción para ese municipio." };
       }
 
       default:
@@ -483,7 +535,7 @@ async function runAnthropic(apiKey, chatMessages, sid) {
           return {
             type:        "tool_result",
             tool_use_id: tu.id,
-            content:     JSON.stringify(result),
+            content:     recortar(result),
           };
         })
       );
@@ -502,24 +554,50 @@ async function runAnthropic(apiKey, chatMessages, sid) {
 }
 
 /* ── Handler alterno · Groq (API compatible con OpenAI Chat Completions) ── */
+/* El plan gratuito de Groq limita los tokens por minuto (429). Se espera lo que
+   indica el propio Groq (hasta 15 s) y se reintenta; así una ráfaga de preguntas
+   no termina en error. */
+async function fetchGroq(apiKey, body, intentos = 2) {
+  for (let i = 0; ; i++) {
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+      body: JSON.stringify(body),
+    });
+    if (res.status !== 429 || i >= intentos) return res;
+    const texto = await res.clone().text();
+    const sugerido = parseFloat(res.headers.get("retry-after")) || parseFloat((texto.match(/try again in ([\d.]+)s/) || [])[1]) || 5;
+    if (sugerido > 15) return res;
+    await new Promise((r) => setTimeout(r, (sugerido + 0.5) * 1000));
+  }
+}
+
+/* Resultados de herramientas recortados: menos tokens por consulta. */
+const MAX_RESULTADO = 3500;
+const recortar = (obj) => {
+  const txt = JSON.stringify(obj);
+  return txt.length <= MAX_RESULTADO ? txt : `${txt.slice(0, MAX_RESULTADO)}… (resultado recortado)`;
+};
+
 async function runGroq(apiKey, chatMessages, sid) {
   const messages = [{ role: "system", content: SYSTEM_PROMPT }, ...chatMessages];
 
   for (let iter = 0; iter < 5; iter++) {
-    const res = await fetch(GROQ_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type":  "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model:       GROQ_MODEL,
-        messages,
-        tools:       OPENAI_TOOLS,
-        max_tokens:  MAX_TOKENS,
-        temperature: 0.2,
-      }),
+    const res = await fetchGroq(apiKey, {
+      model:       GROQ_MODEL,
+      messages,
+      tools:       OPENAI_TOOLS,
+      max_tokens:  MAX_TOKENS,
+      temperature: 0.2,
     });
+
+    if (res.status === 429) {
+      console.error("[chat:groq] límite de tokens por minuto alcanzado");
+      return Response.json(
+        { error: "El asistente está recibiendo muchas consultas en este momento.", ocupado: true },
+        { status: 429 },
+      );
+    }
 
     if (!res.ok) {
       const errText = await res.text();
@@ -557,7 +635,7 @@ async function runGroq(apiKey, chatMessages, sid) {
           try { args = JSON.parse(tc.function.arguments || "{}"); } catch {}
           console.log(`[chat] herramienta: ${tc.function.name}`, args);
           const result = await ejecutarHerramienta(tc.function.name, args);
-          return { role: "tool", tool_call_id: tc.id, content: JSON.stringify(result) };
+          return { role: "tool", tool_call_id: tc.id, content: recortar(result) };
         })
       );
 
@@ -589,8 +667,10 @@ export async function POST(request) {
 
   const sid = await _ensureSession(sessionId);
 
+  /* Solo los últimos 8 mensajes: suficiente contexto y menos tokens por consulta. */
   const chatMessages = messages
     .filter((m) => m.role === "user" || m.role === "assistant")
+    .slice(-8)
     .map((m) => ({ role: m.role, content: m.content }));
 
   const lastUser = [...messages].reverse().find((m) => m.role === "user");

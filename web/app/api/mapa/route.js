@@ -1,49 +1,50 @@
 import pool from "@/lib/db";
+import { VERSION_ACTIVA, RENDIMIENTO_REAL, titulo, errorBD } from "@/lib/modelo";
 
-/* Revalida cada 5 min: evita que la respuesta quede congelada en el build. */
-export const revalidate = 300;
+/* Revalida cada hora: evita que la respuesta quede congelada en el build. */
+export const revalidate = 3600;
 
-const FALLBACK = [
-  { lat:  4.43, lon: -75.23, riesgo: "MEDIO" },
-  { lat:  4.16, lon: -74.88, riesgo: "BAJO"  },
-  { lat:  4.07, lon: -73.63, riesgo: "BAJO"  },
-  { lat:  1.21, lon: -77.27, riesgo: "ALTO"  },
-  { lat: 11.24, lon: -74.21, riesgo: "MEDIO" },
-  { lat:  5.07, lon: -75.52, riesgo: "BAJO"  },
-  { lat:  8.75, lon: -75.88, riesgo: "ALTO"  },
-];
-
-export async function GET() {
+/* Pronóstico por municipio para ?anio= (por defecto el año en curso): cambio
+   mediano esperado (escenario neutral) frente al último rendimiento real, sobre
+   todos los cultivos del municipio. */
+export async function GET(request) {
+  const anio = parseInt(new URL(request.url).searchParams.get("anio"), 10) || new Date().getFullYear();
   try {
     const { rows } = await pool.query(`
-      SELECT m.nombre_municipio,
-             m.nombre_departamento,
-             m.latitud_centroide  AS lat,
-             m.longitud_centroide AS lon,
-             COALESCE(
-               (SELECT pa.nivel_riesgo
-                FROM pred_alerta_climatica pa
-                WHERE pa.id_municipio = m.id_municipio AND pa.activa = TRUE
-                ORDER BY pa.score_probabilidad DESC LIMIT 1),
-               'BAJO'
-             ) AS riesgo
-      FROM dim_municipio m
-      WHERE m.latitud_centroide IS NOT NULL AND m.longitud_centroide IS NOT NULL
-      ORDER BY random()
-      LIMIT 80
-    `);
+      WITH ultimo AS (
+        SELECT DISTINCT ON (f.id_municipio, f.id_cultivo) f.id_municipio, f.id_cultivo, ${RENDIMIENTO_REAL} AS real
+        FROM fact_produccion_agricola f JOIN dim_tiempo t ON t.id_tiempo = f.id_tiempo
+        WHERE ${RENDIMIENTO_REAL} IS NOT NULL
+        ORDER BY f.id_municipio, f.id_cultivo, t.anio DESC
+      )
+      SELECT m.nombre_municipio, m.nombre_departamento,
+             m.latitud_centroide AS lat, m.longitud_centroide AS lon,
+             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY p.rendimiento_predicho / u.real - 1) AS cambio,
+             COUNT(*)::int AS cultivos
+      FROM pred_pronostico p
+      JOIN ultimo u ON u.id_municipio = p.id_municipio AND u.id_cultivo = p.id_cultivo
+      JOIN dim_municipio m ON m.id_municipio = p.id_municipio
+      WHERE p.id_version = ${VERSION_ACTIVA} AND p.tipo = 'pronostico' AND p.escenario = 'Neutral'
+        AND p.anio = $1 AND m.latitud_centroide IS NOT NULL
+      GROUP BY m.id_municipio, m.nombre_municipio, m.nombre_departamento, m.latitud_centroide, m.longitud_centroide
+    `, [anio]);
+
+    const puntos = rows.map((r) => {
+      const cambio = +(parseFloat(r.cambio) * 100).toFixed(1);
+      return {
+        municipio: titulo(r.nombre_municipio),
+        departamento: titulo(r.nombre_departamento),
+        lat: parseFloat(r.lat), lon: parseFloat(r.lon),
+        cambio, cultivos: r.cultivos,
+        tendencia: cambio > 3 ? "sube" : cambio < -3 ? "baja" : "estable",
+      };
+    });
+    const cuenta = (t) => puntos.filter((p) => p.tendencia === t).length;
     return Response.json({
-      fromDB: true,
-      puntos: rows.map((r) => ({
-        municipio:    r.nombre_municipio,
-        departamento: r.nombre_departamento,
-        lat:          parseFloat(r.lat),
-        lon:          parseFloat(r.lon),
-        riesgo:       r.riesgo,
-      })),
+      fromDB: true, anio, puntos,
+      resumen: { sube: cuenta("sube"), estable: cuenta("estable"), baja: cuenta("baja"), total: puntos.length },
     });
   } catch (err) {
-    console.error("[mapa] DB error:", err.message);
-    return Response.json({ fromDB: false, puntos: FALLBACK });
+    return errorBD("mapa", err);
   }
 }

@@ -9,10 +9,10 @@ export const PROBLEMA = [
   {
     icon: "cloudRain",
     tono: "amber",
-    cifra: "15–40 %",
+    cifra: "El Niño",
     titulo: "El clima golpea sin aviso útil",
     texto:
-      "En años de El Niño, el maíz, la papa y el arroz pueden perder entre un 15 % y un 40 % de su rendimiento. La señal climática se conoce con meses de antelación, pero no se traduce en cifras por municipio y cultivo.",
+      "El Niño y La Niña cambian cuánto llueve en el país (nuestros datos lo confirman) y con ello el riesgo de perder cosechas. La señal se conoce con meses de antelación, pero casi nunca se traduce en cifras por municipio y cultivo.",
   },
   {
     icon: "puzzle",
@@ -107,37 +107,39 @@ export const PARA_QUIEN = [
   },
 ];
 
-export const FUENTES_RESUMEN = ["DANE", "IDEAM", "UPRA", "NOAA", "NASA", "MinAgricultura", "FAO", "Banco Mundial"];
-
-export const METRICAS_MODELO = [
-  { v: "> 0,80", l: "R²", d: "El modelo explica más del 80 % de las diferencias de rendimiento entre municipios y años." },
-  { v: "< 0,5",  l: "Error medio (t/ha)", d: "En promedio, la predicción se desvía menos de media tonelada por hectárea." },
-  { v: "< 0,8",  l: "RMSE (t/ha)", d: "Penaliza más los errores grandes; se mantiene por debajo de 0,8 t/ha." },
-];
+export const FUENTES_RESUMEN = ["MinAgricultura · EVA", "DANE", "IDEAM", "UPRA", "NOAA", "NASA"];
 
 export const LIMITACIONES = [
   {
-    titulo: "Eventos extremos puntuales",
-    texto: "Un granizo, una helada o una inundación en un mes concreto pueden arruinar una cosecha sin que los promedios anuales lo reflejen.",
+    titulo: "Pocos años de historia",
+    texto: "La producción oficial cargada va de 2019 a 2024. Con seis años, el modelo aprende bien la tendencia de cada municipio, pero no efectos que se repiten cada muchos años.",
   },
   {
-    titulo: "El pasado no siempre predice el futuro",
-    texto: "Con el cambio climático, los patrones históricos de lluvia y temperatura pueden perder capacidad predictiva.",
+    titulo: "El Niño aún no se refleja en las cosechas",
+    texto: "El Niño y La Niña sí cambian la lluvia (lo prueban los datos), pero con seis años el modelo no logra medir un efecto consistente sobre el rendimiento. Por eso los escenarios suelen dar valores parecidos.",
+  },
+  {
+    titulo: "Cifras repetidas en la fuente",
+    texto: "Muchos municipios reportan el mismo rendimiento varios años seguidos a la Encuesta Agropecuaria. Eso hace difícil distinguir un año estable de un dato copiado.",
+  },
+  {
+    titulo: "Eventos extremos puntuales",
+    texto: "Un granizo, una helada o una inundación en un mes concreto pueden arruinar una cosecha sin que el modelo lo anticipe.",
   },
   {
     titulo: "Sin factores de cada finca",
     texto: "El modelo no conoce el acceso a crédito, las prácticas de cada productor ni choques repentinos del mercado.",
   },
   {
-    titulo: "Huecos en los datos",
-    texto: "Entre el 20 % y el 30 % de los municipios no tiene estación del IDEAM propia; se usan estaciones cercanas (radio de 50 km) y datos satelitales de la NASA.",
+    titulo: "Clima local incompleto",
+    texto: "Solo unos 120 municipios tienen series de clima de estaciones del IDEAM en la base de datos; en el resto el modelo trabaja sin clima local.",
   },
 ];
 
 export const TRABAJO_FUTURO = [
-  "Imágenes satelitales Sentinel-2 (índice de vegetación) para detectar estrés hídrico temprano.",
-  "Modelos especializados por cultivo (maíz, papa, café, arroz) en lugar de uno global.",
-  "Predicciones a 3 años con incertidumbre creciente.",
-  "Alertas por WhatsApp/SMS a productores antes de cada temporada.",
-  "Versión móvil ligera para zonas con poca conectividad.",
+  "Cargar más años de producción (2007–2018) para medir mejor el efecto de El Niño y La Niña.",
+  "Integrar clima satelital (NASA POWER) para todos los municipios.",
+  "Pronosticar por semestre para los cultivos transitorios.",
+  "Actualizar los tableros de Power BI con los rendimientos corregidos.",
+  "Alertas por WhatsApp o SMS a productores antes de cada temporada.",
 ];

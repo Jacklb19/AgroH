@@ -3,35 +3,36 @@ import { useEffect, useState } from "react";
 import { Icon } from "./icons";
 import { SectionHead } from "./ui";
 import { fmtCompact, fmtNum } from "@/lib/format";
-import { ANOVA_TESTS, METRICAS_MODELO, LIMITACIONES, TRABAJO_FUTURO, REPO_URL, DOCS_URL } from "@/lib/content";
+import { labelFeature } from "@/lib/labels";
+import { ANOVA_TESTS, LIMITACIONES, TRABAJO_FUTURO, REPO_URL, DOCS_URL } from "@/lib/content";
 import anova from "@/public/anova_data.json";
 
 const PROCESO = [
   {
     icon: "database", titulo: "Reunimos", tono: "blue",
-    texto: "14 fuentes abiertas: producción agrícola (DANE), clima de 991 estaciones (IDEAM), satélite (NASA), suelos (UPRA), precios (SIPSA) y el índice El Niño / La Niña (NOAA).",
+    texto: "Producción agrícola oficial de 2019 a 2024 (Encuesta Agropecuaria EVA), clima de estaciones del IDEAM, aptitud del suelo (UPRA), precios (DANE) y el índice El Niño / La Niña (NOAA).",
   },
   {
     icon: "filter", titulo: "Limpiamos y unimos", tono: "green",
-    texto: "Cada registro se asocia a su municipio con el código oficial DIVIPOLA, se descartan valores imposibles y duplicados, y todo queda en una sola base de datos.",
+    texto: "Cada registro se asocia a su municipio con el código oficial DIVIPOLA. El rendimiento se calcula como producción ÷ área cosechada y se descartan valores imposibles.",
   },
   {
     icon: "cpu", titulo: "Entrenamos el modelo", tono: "amber",
-    texto: "XGBoost aprende de ~35 variables por municipio, cultivo y año. Se probaron 200 configuraciones y se eligió la de menor error.",
+    texto: "XGBoost parte del rendimiento del año anterior en cada municipio y aprende cuánto suele cambiar según el cultivo, la región, el suelo y El Niño / La Niña.",
   },
   {
     icon: "checkCircle", titulo: "Validamos", tono: "violet",
-    texto: "Se evalúa con los años más recientes, que el modelo nunca vio al entrenar: así se simula predecir el futuro de verdad.",
+    texto: "Para 2022, 2023 y 2024, el modelo se entrena solo con los años anteriores y se compara con lo que realmente pasó. Así se simula predecir el futuro de verdad.",
   },
 ];
 
 const VARIABLES = [
-  { icon: "cloudRain", t: "Clima",       d: "Lluvia acumulada, temperatura, humedad y horas de sol, por semestre." },
-  { icon: "sun",       t: "El Niño / La Niña", d: "Fase del fenómeno, anomalía de lluvia y probabilidad de sequía o exceso." },
-  { icon: "layers",    t: "Suelo",       d: "Aptitud del suelo para cada cultivo según la UPRA." },
-  { icon: "trend",     t: "Mercado",     d: "Precio mayorista del producto y precio de los insumos." },
-  { icon: "calendar",  t: "Historia",    d: "Rendimiento de años anteriores y clima de 1 y 3 años atrás." },
-  { icon: "map",       t: "Territorio",  d: "Municipio, departamento y región natural." },
+  { icon: "calendar", t: "Historia del municipio", d: "Rendimiento de los años anteriores, su promedio, su variación y la tendencia reciente." },
+  { icon: "wheat",    t: "Cultivo y región",       d: "Rendimiento típico del cultivo en el país y en el departamento; región natural y ubicación." },
+  { icon: "layers",   t: "Suelo",                  d: "Aptitud del suelo para el cultivo según la UPRA." },
+  { icon: "cloudRain",t: "Clima típico",           d: "Lluvia y temperatura habituales del municipio (donde hay estaciones)." },
+  { icon: "sun",      t: "El Niño / La Niña",      d: "Índice ONI del año pronosticado, usado como escenario." },
+  { icon: "trend",    t: "Escala de producción",   d: "Área cosechada el año anterior." },
 ];
 
 function AnovaCard({ test, row }) {
@@ -71,24 +72,79 @@ function AnovaCard({ test, row }) {
   );
 }
 
+function Precision({ modelo }) {
+  if (!modelo) return <div className="panel-empty">Cargando métricas del modelo…</div>;
+  if (!modelo.metricas) return <div className="notice-bar"><Icon.alert size={15} /> Las métricas no están disponibles en este momento.</div>;
+  const m = modelo.metricas;
+  const r = m.referencias;
+  const filas = [
+    { l: "Modelo AgroIA", d: r.modelo_mismas_filas, main: true },
+    { l: "Repetir el año anterior", d: r.anio_anterior },
+    { l: "Promedio histórico del municipio", d: r.promedio_historico },
+  ];
+  return (
+    <>
+      <div className="metric-tiles">
+        <div className="metric-tile">
+          <div className="v">{fmtNum(m.modelo.r2, 2)}</div><div className="l">R²</div>
+          <p>El modelo explica el {fmtNum(m.modelo.r2 * 100, 0)} % de las diferencias de rendimiento entre municipios, cultivos y años.</p>
+        </div>
+        <div className="metric-tile">
+          <div className="v">{fmtNum(m.modelo.error_relativo_mediano * 100, 1)} %</div><div className="l">Error típico</div>
+          <p>En la mitad de los casos, el pronóstico se desvió menos que esto del valor real.</p>
+        </div>
+        <div className="metric-tile">
+          <div className="v">{fmtNum(m.cobertura_rango_90 * 100, 0)} %</div><div className="l">Rango confiable</div>
+          <p>Veces que el valor real cayó dentro del rango probable que muestra la página (se busca el 90 %).</p>
+        </div>
+      </div>
+      <div className="table-scroll" style={{ marginTop: 14 }}>
+        <table className="data-table compact">
+          <thead><tr><th>Método</th><th>R²</th><th>Error medio (t/ha)</th><th>Error grande · RMSE (t/ha)</th></tr></thead>
+          <tbody>
+            {filas.map((f) => (
+              <tr key={f.l} className={f.main ? "current" : ""}>
+                <td><strong>{f.l}</strong></td>
+                <td className="num">{fmtNum(f.d.r2, 3)}</td>
+                <td className="num">{fmtNum(f.d.mae, 2)}</td>
+                <td className="num">{fmtNum(f.d.rmse, 2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="fine-print">
+        Backtest sobre {fmtNum(r.modelo_mismas_filas.n, 0)} casos de 2022 a 2024. Muchos municipios repiten su rendimiento de un año a otro,
+        por eso “repetir el año anterior” casi empata en error medio; el modelo reduce los errores grandes y es el único que entrega
+        rango probable y escenarios. Versión {modelo.version.id}, entrenada el{" "}
+        {new Date(modelo.version.fecha).toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" })}.
+      </p>
+    </>
+  );
+}
+
 export default function PageMetodologia() {
   const [fuentes, setFuentes] = useState([]);
   const [calidad, setCalidad] = useState([]);
+  const [modelo, setModelo] = useState(null);
 
   useEffect(() => {
     fetch("/api/catalogo").then((r) => r.json()).then(setFuentes).catch(() => setFuentes([]));
     fetch("/api/calidad").then((r) => r.json()).then((d) => setCalidad(d.reportes || [])).catch(() => setCalidad([]));
+    fetch("/api/modelo").then((r) => r.json()).then(setModelo).catch(() => setModelo({}));
   }, []);
 
   const pruebas = anova.pruebas || [];
-  const hayConteos = fuentes.some((f) => f.filas != null);
+  const importancia = modelo?.metricas?.importancia?.slice(0, 3) || [];
+  const cargadas = fuentes.filter((f) => f.filas > 0).length;
+  const alertas = modelo?.modelo_alertas;
 
   return (
     <>
       {/* ── Proceso ──────────────────────────────────────────── */}
       <section className="section page-top">
         <div className="container">
-          <SectionHead eyebrow="Cómo funciona" tone="blue" title="Del dato público a la predicción, paso a paso">
+          <SectionHead eyebrow="Cómo funciona" tone="blue" title="Del dato público al pronóstico, paso a paso">
             Todo el proceso es abierto y reproducible: las fuentes, el código y las métricas se pueden auditar.
           </SectionHead>
           <ol className="process">
@@ -109,8 +165,55 @@ export default function PageMetodologia() {
         </div>
       </section>
 
+      {/* ── El modelo ────────────────────────────────────────── */}
+      <section className="section section-gray">
+        <div className="container">
+          <SectionHead eyebrow="El modelo" tone="amber" title="Qué predice y qué tan bien lo hace">
+            El modelo estima el rendimiento, en toneladas por hectárea, de un cultivo en un municipio para cada uno de los
+            próximos años, con un rango probable y los factores que más movieron el resultado.
+          </SectionHead>
+
+          <div className="model-grid">
+            <div>
+              <h3 className="sub-title">Qué información usa</h3>
+              <div className="var-grid">
+                {VARIABLES.map((v) => {
+                  const I = Icon[v.icon];
+                  return (
+                    <div key={v.t} className="var-item">
+                      <span className="icon-chip sm"><I size={15} /></span>
+                      <div><strong>{v.t}</strong><p>{v.d}</p></div>
+                    </div>
+                  );
+                })}
+              </div>
+              {importancia.length > 0 && (
+                <p className="callout">
+                  <Icon.info size={16} />
+                  <span>
+                    Lo que más pesa en el modelo actual: {importancia.map((f, i) => (
+                      <span key={f.feature}><strong>{labelFeature(f.feature).toLowerCase()}</strong>{i < importancia.length - 2 ? ", " : i === importancia.length - 2 ? " y " : "."}</span>
+                    ))}
+                  </span>
+                </p>
+              )}
+              <h3 className="sub-title" style={{ marginTop: 28 }}>Sin caja negra</h3>
+              <p className="body-text">
+                Cada pronóstico muestra cuánto sumó o restó cada factor (contribuciones del propio modelo, equivalentes a SHAP).
+                Lo verás en la página de Predicción, en el panel “Por qué este resultado”.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="sub-title">Qué tan preciso es</h3>
+              <Precision modelo={modelo} />
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── Evidencia ────────────────────────────────────────── */}
-      <section id="evidencia" className="section section-gray">
+      <section id="evidencia" className="section">
         <div className="container">
           <SectionHead eyebrow="Evidencia estadística" title="Lo que comprobamos antes de predecir">
             Usamos pruebas ANOVA, que indican si las diferencias entre grupos son reales o fruto del azar. En las cuatro,
@@ -128,88 +231,32 @@ export default function PageMetodologia() {
         </div>
       </section>
 
-      {/* ── El modelo ────────────────────────────────────────── */}
-      <section className="section">
-        <div className="container">
-          <SectionHead eyebrow="El modelo" tone="amber" title="Qué predice y qué tan bien lo hace">
-            El modelo estima el rendimiento, en toneladas por hectárea, de un cultivo en un municipio y un año concretos.
-            Cada predicción viene con un rango probable y con los factores que más la explican.
-          </SectionHead>
-
-          <div className="model-grid">
-            <div>
-              <h3 className="sub-title">Qué información usa</h3>
-              <div className="var-grid">
-                {VARIABLES.map((v) => {
-                  const I = Icon[v.icon];
-                  return (
-                    <div key={v.t} className="var-item">
-                      <span className="icon-chip sm"><I size={15} /></span>
-                      <div><strong>{v.t}</strong><p>{v.d}</p></div>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="callout">
-                <Icon.info size={16} />
-                <span>Los factores que más pesan son la <strong>lluvia acumulada del año</strong>, la <strong>aptitud del suelo</strong> y la <strong>temperatura promedio</strong>.</span>
-              </p>
-            </div>
-
-            <div>
-              <h3 className="sub-title">Qué tan preciso es</h3>
-              <div className="metric-tiles">
-                {METRICAS_MODELO.map((m) => (
-                  <div key={m.l} className="metric-tile">
-                    <div className="v">{m.v}</div>
-                    <div className="l">{m.l}</div>
-                    <p>{m.d}</p>
-                  </div>
-                ))}
-              </div>
-              <p className="fine-print">
-                Medido sobre el 20 % de años más recientes, que el modelo no vio al entrenar. Los ajustes del modelo se eligieron
-                con validación cruzada temporal de 5 bloques. Las métricas exactas de cada entrenamiento quedan registradas en la base de datos.
-              </p>
-              <h3 className="sub-title" style={{ marginTop: 28 }}>Sin caja negra</h3>
-              <p className="body-text">
-                Con la técnica SHAP, cada predicción muestra cuánto sumó o restó cada factor. Lo verás en la página de
-                Predicción, en el panel “Por qué este resultado”.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* ── Fuentes ──────────────────────────────────────────── */}
       <section id="fuentes" className="section section-gray">
         <div className="container">
-          <SectionHead eyebrow="Fuentes de datos" title={`${fuentes.length || 14} conjuntos de datos abiertos`}>
-            Los marcados como estratégicos forman parte de la Hoja de Ruta Sectorial Agropecuaria del Plan Nacional de
-            Datos Abiertos.
+          <SectionHead eyebrow="Fuentes de datos" title="Datos abiertos que usa la plataforma">
+            {cargadas ? `${cargadas} de ${fuentes.length} fuentes tienen datos cargados en la base de datos; ` : ""}
+            las demás tienen extractor listo en el pipeline pero aún no se han cargado. Las marcadas como estratégicas forman
+            parte de la Hoja de Ruta Sectorial Agropecuaria.
           </SectionHead>
           <div className="card">
             <div className="table-scroll">
               <table className="data-table">
-                <thead>
-                  <tr><th>Conjunto de datos</th><th>Entidad</th>{hayConteos && <th>Registros</th>}<th>Enlace</th></tr>
-                </thead>
+                <thead><tr><th>Conjunto de datos</th><th>Entidad</th><th>Estado</th><th>Enlace</th></tr></thead>
                 <tbody>
-                  {fuentes.length === 0 && (
-                    <tr><td colSpan={4} className="muted">Cargando fuentes…</td></tr>
-                  )}
-                  {fuentes.map((f) => (
+                  {fuentes.length === 0 && <tr><td colSpan={4} className="muted">Cargando fuentes…</td></tr>}
+                  {[...fuentes].sort((a, b) => (b.filas > 0) - (a.filas > 0)).map((f) => (
                     <tr key={f.id}>
                       <td>
                         <strong>{f.titulo}</strong>
                         {f.estrategico && <span className="tag-strategic">Estratégico</span>}
                       </td>
                       <td>{f.entidad}</td>
-                      {hayConteos && <td className="num">{f.filas != null ? fmtCompact(f.filas) : "—"}</td>}
+                      <td>{f.filas > 0
+                        ? <span className="status ok">{fmtCompact(f.filas)} registros</span>
+                        : <span className="status off">Sin cargar</span>}</td>
                       <td>
-                        <a href={f.uri} target="_blank" rel="noopener noreferrer" className="ext-link">
-                          Ver fuente <Icon.external />
-                        </a>
+                        <a href={f.uri} target="_blank" rel="noopener noreferrer" className="ext-link">Ver fuente <Icon.external /></a>
                       </td>
                     </tr>
                   ))}
@@ -220,12 +267,11 @@ export default function PageMetodologia() {
         </div>
       </section>
 
-      {/* ── Limitaciones ─────────────────────────────────────── */}
+      {/* ── Limitaciones y transparencia ─────────────────────── */}
       <section className="section">
         <div className="container">
           <SectionHead eyebrow="Limitaciones" tone="amber" title="Lo que el modelo no puede ver">
-            Conocer los límites es parte de usar bien la herramienta. Estas son las principales, y lo que planeamos para
-            superarlas.
+            Conocer los límites es parte de usar bien la herramienta. Estas son las principales y lo que planeamos para superarlas.
           </SectionHead>
           <div className="limits-grid">
             <div className="limits-list">
@@ -236,11 +282,25 @@ export default function PageMetodologia() {
                 </div>
               ))}
             </div>
-            <div className="future-card">
-              <h3><Icon.sparkles size={16} /> Próximos pasos</h3>
-              <ul>
-                {TRABAJO_FUTURO.map((t) => <li key={t}>{t}</li>)}
-              </ul>
+            <div>
+              <div className="future-card">
+                <h3><Icon.sparkles size={16} /> Próximos pasos</h3>
+                <ul>{TRABAJO_FUTURO.map((t) => <li key={t}>{t}</li>)}</ul>
+              </div>
+              <div className="transp-card">
+                <h3><Icon.shield size={16} /> Transparencia</h3>
+                <p>
+                  Al revisar los datos encontramos que el cargue original sumaba el rendimiento de los semestres A y B, lo que
+                  inflaba el 36 % de los registros (por ejemplo, arroz en Ibagué aparecía con 15 t/ha en lugar de 7,6).
+                  El modelo actual calcula el rendimiento como producción ÷ área cosechada y el error quedó corregido en el pipeline.
+                </p>
+                {alertas?.exactitud != null && (
+                  <p>
+                    El modelo de alertas climáticas por municipio es experimental (exactitud {fmtNum(alertas.exactitud * 100, 0)} %) y no se usa
+                    en los pronósticos.
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -254,7 +314,7 @@ export default function PageMetodologia() {
             <div className="audience-card">
               <span className="icon-chip"><Icon.code size={18} /></span>
               <h3>Código abierto</h3>
-              <p>El pipeline de datos, los modelos y esta web están en GitHub. Los modelos se reentrenan con un solo comando.</p>
+              <p>El pipeline de datos, los modelos y esta web están en GitHub. El pronóstico se reentrena con un solo comando.</p>
             </div>
             <div className="audience-card">
               <span className="icon-chip"><Icon.database size={18} /></span>
@@ -276,10 +336,10 @@ export default function PageMetodologia() {
                   <h4>Arquitectura</h4>
                   <ul>
                     <li>Pipeline ETL en Python: extracción Socrata/GeoServer, limpieza y carga (<code>run_pipeline.py</code>).</li>
-                    <li>PostgreSQL con esquema estrella: 6 dimensiones, 7 tablas de hechos y 2 de predicción (<code>load/schema.sql</code>).</li>
-                    <li>XGBoost + Optuna (200 trials, TimeSeriesSplit 5-fold); SHAP persistido por predicción.</li>
-                    <li>IsolationForest para detectar predicciones atípicas.</li>
-                    <li>Web en Next.js; asistente con Claude y consultas SQL mediante herramientas.</li>
+                    <li>PostgreSQL (Supabase) con esquema estrella: dimensiones de municipio, cultivo y tiempo; hechos de producción, clima, ENSO, suelo y precios.</li>
+                    <li>Pronóstico: <code>models/train_pronostico.py</code> → XGBoost sobre el cambio logarítmico frente al año anterior (pérdida absoluta, atenuación {modelo?.metricas?.alpha ?? 0.5}), backtest de origen móvil, rango del 90 % por cultivo.</li>
+                    <li>Resultados en <code>pred_pronostico</code> (backtest y pronósticos por escenario) y métricas en <code>model_version</code>.</li>
+                    <li>Web en Next.js; asistente con Claude o Groq y consultas SQL mediante herramientas.</li>
                   </ul>
                 </div>
                 <div>
@@ -291,6 +351,7 @@ export default function PageMetodologia() {
                   </ul>
                   <h4 style={{ marginTop: 18 }}>Reproducir</h4>
                   <pre className="code-block">{`python run_pipeline.py --mode all --once
+python -m models.train_pronostico --write
 python -m validate.anova_tests --verbose
 cd web && npm install && npm run dev`}</pre>
                 </div>
@@ -301,9 +362,7 @@ cd web && npm install && npm run dev`}</pre>
                   <h4 style={{ marginTop: 24 }}>Calidad por fuente (última extracción)</h4>
                   <div className="table-scroll">
                     <table className="data-table compact">
-                      <thead>
-                        <tr><th>Fuente</th><th>Filas</th><th>Columnas</th><th>Completitud media</th><th>Duplicados</th><th>Extraído</th></tr>
-                      </thead>
+                      <thead><tr><th>Fuente</th><th>Filas</th><th>Columnas</th><th>Completitud media</th><th>Duplicados</th><th>Extraído</th></tr></thead>
                       <tbody>
                         {calidad.map((c) => (
                           <tr key={c.fuente}>

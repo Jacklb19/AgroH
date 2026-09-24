@@ -3,22 +3,22 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import ColombiaMap from "./charts/ColombiaMap";
 import { Icon } from "./icons";
-import { SectionHead, DemoNotice } from "./ui";
+import { SectionHead } from "./ui";
 import { fmtCompact } from "@/lib/format";
 import { PROBLEMA, ANOVA_TESTS, PARA_QUIEN, FUENTES_RESUMEN } from "@/lib/content";
 
 const USOS = [
   {
     href: "/prediccion", icon: "target", tono: "green",
-    titulo: "Predice un cultivo",
-    texto: "Elige municipio, cultivo y semestre. Obtén el rendimiento esperado, su rango probable y el nivel de riesgo.",
+    titulo: "Pronostica un cultivo",
+    texto: "Elige municipio, cultivo y temporada. Obtén el rendimiento esperado, su rango probable y qué tan estable ha sido.",
     cta: "Probar predicción",
   },
   {
     href: "/prediccion", icon: "sliders", tono: "blue",
-    titulo: "Simula El Niño o La Niña",
-    texto: "Mueve lluvia, temperatura y fertilización para ver cómo cambiaría la cosecha en cada escenario.",
-    cta: "Abrir simulador",
+    titulo: "Compara escenarios",
+    texto: "Mira qué espera el modelo con El Niño, La Niña o un año normal, y simula cambios de lluvia y temperatura.",
+    cta: "Abrir predicción",
   },
   {
     href: "/asistente", icon: "message", tono: "amber",
@@ -29,44 +29,46 @@ const USOS = [
   {
     href: "/datos", icon: "barChart", tono: "violet",
     titulo: "Explora los datos",
-    texto: "Rendimiento real frente al predicho, alertas activas y tableros interactivos por región y cultivo.",
+    texto: "Qué tan bien predice el modelo, qué se espera por cultivo, precios de insumos y tableros interactivos.",
     cta: "Explorar datos",
   },
 ];
 
-function RiesgoHoy({ puntos, semaforo, demo }) {
-  const total = semaforo ? semaforo.bajo + semaforo.medio + semaforo.alto : 0;
-  const pct = (v) => (total ? Math.round((v / total) * 100) : 0);
-  const filas = semaforo
+function PronosticoMapa({ mapa }) {
+  const r = mapa?.resumen;
+  const pct = (v) => (r?.total ? Math.round((v / r.total) * 100) : 0);
+  const filas = r
     ? [
-        { k: "alto",  label: "Alto",  v: semaforo.alto },
-        { k: "medio", label: "Medio", v: semaforo.medio },
-        { k: "bajo",  label: "Bajo",  v: semaforo.bajo },
+        { k: "sube",    label: "Sube",    v: r.sube },
+        { k: "estable", label: "Estable", v: r.estable },
+        { k: "baja",    label: "Baja",    v: r.baja },
       ]
     : [];
-
   return (
     <div className="hero-panel">
       <div className="hero-panel-head">
         <div>
-          <div className="hero-panel-title">Riesgo climático actual</div>
-          <div className="hero-panel-sub">Alertas activas por municipio</div>
+          <div className="hero-panel-title">Pronóstico de cosecha {mapa?.anio || ""}</div>
+          <div className="hero-panel-sub">Cambio esperado frente al último año registrado, por municipio</div>
         </div>
-        <DemoNotice show={demo} />
       </div>
       <div className="map-frame">
-        <ColombiaMap puntos={puntos} height={250} />
+        {mapa?.puntos
+          ? <ColombiaMap puntos={mapa.puntos} height={260} />
+          : <div className="map-loading">{mapa?.error ? "Mapa no disponible en este momento" : "Cargando mapa…"}</div>}
       </div>
-      {total > 0 && (
+      {r && (
         <>
-          <div className="stack-bar" role="img" aria-label={`Alto ${pct(semaforo.alto)}%, medio ${pct(semaforo.medio)}%, bajo ${pct(semaforo.bajo)}%`}>
-            {filas.map((f) => <span key={f.k} className={f.k} style={{ width: `${pct(f.v)}%` }} />)}
-          </div>
           <div className="stack-legend">
             {filas.map((f) => (
-              <span key={f.k}><i className={f.k} /> {f.label} <strong>{pct(f.v)}%</strong></span>
+              <span key={f.k}><i className={f.k} /> {f.label} <strong>{f.v.toLocaleString("es-CO")}</strong></span>
             ))}
           </div>
+          <p className="hero-panel-note">
+            {pct(r.estable) >= 60
+              ? `En el ${pct(r.estable)} % de los municipios se espera un rendimiento similar al último registrado (±3 %).`
+              : `${pct(r.sube)} % de los municipios suben y ${pct(r.baja)} % bajan frente al último año registrado.`}
+          </p>
         </>
       )}
     </div>
@@ -74,20 +76,13 @@ function RiesgoHoy({ puntos, semaforo, demo }) {
 }
 
 export default function PageInicio() {
-  const [stats,    setStats]    = useState(null);
-  const [mapa,     setMapa]     = useState({ puntos: [], fromDB: true });
-  const [semaforo, setSemaforo] = useState(null);
-  const [dashDemo, setDashDemo] = useState(false);
+  const [stats, setStats] = useState(null);
+  const [mapa, setMapa] = useState(null);
 
   useEffect(() => {
-    fetch("/api/impacto").then((r) => r.json()).then(setStats).catch(() => {});
-    fetch("/api/mapa").then((r) => r.json()).then(setMapa).catch(() => {});
-    fetch("/api/dashboards").then((r) => r.json())
-      .then((d) => { setSemaforo(d.semaforo); setDashDemo(!d.fromDB); })
-      .catch(() => {});
+    fetch("/api/resumen").then((r) => r.json()).then(setStats).catch(() => {});
+    fetch(`/api/mapa?anio=${new Date().getFullYear()}`).then((r) => r.json()).then(setMapa).catch(() => setMapa({ error: true }));
   }, []);
-
-  const demo = stats?.fromDB === false;
 
   return (
     <>
@@ -100,8 +95,8 @@ export default function PageInicio() {
               Sabe qué esperar de tu cosecha <em>antes de sembrar</em>
             </h1>
             <p className="lede">
-              AgroIA cruza clima, suelos, precios e historia de producción para anticipar el rendimiento
-              de un cultivo y su riesgo climático en cualquier municipio del país.
+              AgroIA cruza la historia de producción oficial, el suelo, el clima y el fenómeno de El Niño para pronosticar
+              el rendimiento de cada cultivo en cada municipio del país, con un rango honesto de incertidumbre.
             </p>
             <div className="hero-actions">
               <Link href="/prediccion" className="btn-primary">
@@ -110,14 +105,13 @@ export default function PageInicio() {
               <Link href="/datos" className="btn-outline-white">Explorar datos</Link>
             </div>
             <div className="hero-stats">
-              <div className="hero-stat"><div className="num">{fmtCompact(stats?.municipios_cubiertos)}</div><div className="lbl">Municipios</div></div>
-              <div className="hero-stat"><div className="num">{fmtCompact(stats?.cultivos_monitoreados)}</div><div className="lbl">Cultivos</div></div>
-              <div className="hero-stat"><div className="num">{fmtCompact(stats?.hectareas_cobertura)}</div><div className="lbl">Hectáreas en registros</div></div>
-              <div className="hero-stat"><div className="num">2007–25</div><div className="lbl">Historia de producción</div></div>
+              <div className="hero-stat"><div className="num">{stats?.municipios ? fmtCompact(stats.municipios) : "—"}</div><div className="lbl">Municipios con pronóstico</div></div>
+              <div className="hero-stat"><div className="num">{stats?.cultivos ? fmtCompact(stats.cultivos) : "—"}</div><div className="lbl">Cultivos</div></div>
+              <div className="hero-stat"><div className="num">{stats?.combinaciones ? fmtCompact(stats.combinaciones) : "—"}</div><div className="lbl">Pronósticos municipio × cultivo</div></div>
+              <div className="hero-stat"><div className="num">{stats?.anio_desde ? `${stats.anio_desde}–${String(stats.anio_hasta).slice(2)}` : "—"}</div><div className="lbl">Cosechas registradas</div></div>
             </div>
-            {demo && <div style={{ marginTop: 14 }}><DemoNotice show inverse /></div>}
           </div>
-          <RiesgoHoy puntos={mapa.puntos} semaforo={semaforo} demo={!mapa.fromDB || dashDemo} />
+          <PronosticoMapa mapa={mapa} />
         </div>
       </section>
 
@@ -145,7 +139,7 @@ export default function PageInicio() {
           </div>
           <p className="solution-line">
             <Icon.checkCircle size={18} />
-            <span><strong>AgroIA reúne esas fuentes en un solo lugar</strong> y las convierte en una predicción por municipio y cultivo, explicada en lenguaje simple.</span>
+            <span><strong>AgroIA reúne esas fuentes en un solo lugar</strong> y las convierte en un pronóstico por municipio y cultivo, explicado en lenguaje simple.</span>
           </p>
         </div>
       </section>
@@ -204,23 +198,23 @@ export default function PageInicio() {
             <div className="step">
               <div className="step-head"><div className="step-num">1</div><span className="step-pill">Datos</span></div>
               <h3>Reunimos datos abiertos</h3>
-              <p>Producción agrícola, clima de 991 estaciones, precios, aptitud de suelos y el índice El Niño / La Niña, unificados por municipio.</p>
+              <p>Producción agrícola oficial, clima de estaciones del IDEAM, precios, aptitud de suelos y el índice El Niño / La Niña, unificados por municipio.</p>
             </div>
             <div className="step">
               <div className="step-head"><div className="step-num">2</div><span className="step-pill">Modelo</span></div>
               <h3>Un modelo aprende del pasado</h3>
-              <p>Un modelo de aprendizaje automático (XGBoost) estudia 18 años de cosechas y clima para estimar el rendimiento de la próxima temporada.</p>
+              <p>Un modelo de aprendizaje automático (XGBoost) aprende de las cosechas de 2019 a 2024 y se prueba con años que no vio antes de usarse.</p>
             </div>
             <div className="step">
               <div className="step-head"><div className="step-num">3</div><span className="step-pill">Decisión</span></div>
               <h3>Tú decides con más información</h3>
-              <p>Recibes el rendimiento esperado, el riesgo climático, los factores que más pesan y recomendaciones de siembra.</p>
+              <p>Recibes el rendimiento esperado, su rango probable, qué tan estable ha sido el cultivo y recomendaciones de siembra.</p>
             </div>
           </div>
           <div className="sources-strip">
             <span className="sources-label">Fuentes</span>
             {FUENTES_RESUMEN.map((f) => <span key={f} className="source-chip">{f}</span>)}
-            <Link href="/metodologia#fuentes" className="link-arrow small">Ver las 14 fuentes <Icon.arrow className="arrow" /></Link>
+            <Link href="/metodologia#fuentes" className="link-arrow small">Ver todas las fuentes <Icon.arrow className="arrow" /></Link>
           </div>
         </div>
       </section>
@@ -251,7 +245,7 @@ export default function PageInicio() {
         <div className="container">
           <div className="cta-band">
             <div>
-              <h2>Prueba una predicción en menos de un minuto</h2>
+              <h2>Prueba un pronóstico en menos de un minuto</h2>
               <p>Elige un municipio y un cultivo. Sin registro.</p>
             </div>
             <Link href="/prediccion" className="btn-primary">

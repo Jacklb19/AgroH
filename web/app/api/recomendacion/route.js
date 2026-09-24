@@ -1,144 +1,86 @@
 import pool from "@/lib/db";
+import { errorBD } from "@/lib/modelo";
 
-/* Heurística agronómica simple alimentada por datos reales de la BD.
-   - Ventana óptima: mes con mayor lluvia mensual histórica (ajustada por ENSO).
-   - Dosis fertilizante: factor según aptitud SIPRA + déficit hídrico esperado.
-   - Riesgo de plaga: intensidad de alertas activas en la zona.                */
+/* Recomendaciones basadas en datos reales de la BD (aptitud UPRA, fase ENSO de
+   NOAA, variabilidad histórica) más un calendario típico de siembra para los
+   cultivos transitorios más comunes. Body: { id_municipio, id_cultivo, semestre }. */
 
-const VENTANAS_BASE = {
-  "Arroz":     { semestreA: ["abril", "mayo"],         semestreB: ["octubre", "noviembre"] },
-  "Maíz":      { semestreA: ["marzo", "abril"],         semestreB: ["septiembre", "octubre"] },
-  "Café":      { semestreA: ["febrero", "marzo"],       semestreB: ["agosto", "septiembre"] },
-  "Caña":      { semestreA: ["enero", "febrero"],       semestreB: ["julio", "agosto"] },
-  "Papa":      { semestreA: ["abril", "mayo"],          semestreB: ["octubre", "noviembre"] },
-  "Plátano":   { semestreA: ["marzo", "abril"],         semestreB: ["septiembre", "octubre"] },
-  "Aguacate":  { semestreA: ["febrero", "marzo"],       semestreB: ["agosto", "septiembre"] },
+const CALENDARIO = {
+  "Arroz":    { A: ["marzo", "abril"],     B: ["agosto", "septiembre"] },
+  "Maíz":     { A: ["marzo", "abril"],     B: ["septiembre", "octubre"] },
+  "Frijol":   { A: ["marzo", "abril"],     B: ["septiembre", "octubre"] },
+  "Papa":     { A: ["marzo", "abril"],     B: ["septiembre", "octubre"] },
+  "Arveja":   { A: ["marzo", "abril"],     B: ["septiembre", "octubre"] },
+  "Sorgo":    { A: ["abril", "mayo"],      B: ["agosto", "septiembre"] },
+  "Soya":     { A: ["abril", "mayo"],      B: ["agosto", "septiembre"] },
+  "Algodón":  { A: ["febrero", "marzo"],   B: ["julio", "agosto"] },
+  "Tomate":   { A: ["febrero", "marzo"],   B: ["agosto", "septiembre"] },
+  "Yuca":     { A: ["marzo", "abril"],     B: ["septiembre", "octubre"] },
 };
 
-function ventanaPorCultivo(cultivo, enso) {
-  const key = Object.keys(VENTANAS_BASE).find((k) => cultivo.includes(k)) || "Maíz";
-  const v = VENTANAS_BASE[key];
-  const ajusteEnso = enso === "El Niño" ? "Adelanta 2 semanas para evitar déficit hídrico"
-                   : enso === "La Niña" ? "Atrasa 1-2 semanas y refuerza drenaje"
-                   : "Mantén el calendario tradicional";
-  return { cultivoBase: key, semestreA: v.semestreA, semestreB: v.semestreB, ajusteEnso };
-}
+const APTITUD_TXT = {
+  alta:     "El suelo tiene aptitud alta para este cultivo según la UPRA.",
+  moderada: "El suelo tiene aptitud moderada: es viable con buen manejo de suelo y agua.",
+  marginal: "El suelo tiene aptitud marginal: espera rendimientos menores o mayores costos de manejo.",
+  no_apta:  "La UPRA clasifica el suelo como no apto para este cultivo en este municipio.",
+};
 
-function dosisFertilizante(aptitud, prob_deficit) {
-  const base = aptitud === "alta" ? 250
-             : aptitud === "moderada" ? 320
-             : aptitud === "marginal" ? 400 : 350;
-  const ajuste = (prob_deficit || 0) > 0.6 ? 30 : 0;
-  return {
-    nitrogenado_kg_ha: base + ajuste,
-    desglose: {
-      base_aptitud: base,
-      ajuste_deficit: ajuste,
-    },
-    nota: aptitud === "no_apta"
-      ? "⚠ Suelo clasificado no apto: considera rotación o un cultivo alternativo."
-      : aptitud
-        ? `Aptitud SIPRA: ${aptitud}.`
-        : "Sin clase de aptitud SIPRA disponible — se usa dosis estándar.",
-  };
-}
+const ENSO_TXT = {
+  "El Niño": "Fase El Niño: suele traer menos lluvia en las regiones Andina y Caribe. Planea riego de apoyo y conserva la humedad del suelo.",
+  "La Niña": "Fase La Niña: suele traer más lluvia. Revisa el drenaje y vigila enfermedades por exceso de humedad.",
+  "Neutro":  "Fase neutral: sin señal fuerte de El Niño o La Niña. Sigue el pronóstico mensual del IDEAM.",
+};
 
 export async function POST(request) {
-  const { muni, cultivo, enso = "Neutral", lluvia = "Normal" } = await request.json();
-  const nombreMuni = (muni || "").split(",")[0].trim();
-
-  let aptitud = null, prob_deficit = null, alertasAlto = 0, rendimientoBase = null;
+  const { id_municipio, id_cultivo, semestre = "A" } = await request.json();
+  const muni = String(id_municipio || "").trim();
+  const cultivo = parseInt(id_cultivo, 10);
 
   try {
-    const [apt, enso_q, alertas, rend] = await Promise.all([
+    const [cult, apt, enso] = await Promise.all([
+      pool.query("SELECT nombre_cultivo, tipo_ciclo FROM dim_cultivo WHERE id_cultivo = $1", [cultivo]),
+      pool.query("SELECT clase_aptitud FROM fact_aptitud_suelo WHERE id_municipio = $1 AND id_cultivo = $2 LIMIT 1", [muni, cultivo]),
       pool.query(`
-        SELECT fa.clase_aptitud
-        FROM fact_aptitud_suelo fa
-        JOIN dim_municipio m ON m.id_municipio = fa.id_municipio
-        JOIN dim_cultivo   c ON c.id_cultivo   = fa.id_cultivo
-        WHERE m.nombre_municipio ILIKE $1 AND c.nombre_cultivo ILIKE $2
-        LIMIT 1
-      `, [`%${nombreMuni}%`, `%${cultivo}%`]),
-      pool.query(`
-        SELECT AVG(fae.probabilidad_deficit_hidrico) AS pdef
-        FROM fact_alerta_enso fae
-        JOIN dim_tiempo t ON t.id_tiempo = fae.id_tiempo
-        WHERE t.anio >= EXTRACT(YEAR FROM CURRENT_DATE) - 2
+        SELECT t.anio, t.nombre_mes, e.fase_enso
+        FROM fact_alerta_enso e JOIN dim_tiempo t ON t.id_tiempo = e.id_tiempo
+        ORDER BY t.anio DESC, t.mes DESC LIMIT 1
       `),
-      pool.query(`
-        SELECT COUNT(*)::int AS n
-        FROM pred_alerta_climatica pa
-        JOIN dim_municipio m ON m.id_municipio = pa.id_municipio
-        WHERE m.nombre_municipio ILIKE $1
-          AND pa.activa = TRUE AND pa.nivel_riesgo = 'ALTO'
-      `, [`%${nombreMuni}%`]),
-      pool.query(`
-        SELECT ROUND(AVG(pr.rendimiento_predicho_t_ha)::numeric, 2) AS yhat
-        FROM pred_rendimiento pr
-        JOIN dim_municipio m ON m.id_municipio = pr.id_municipio
-        JOIN dim_cultivo   c ON c.id_cultivo   = pr.id_cultivo
-        WHERE m.nombre_municipio ILIKE $1 AND c.nombre_cultivo ILIKE $2
-      `, [`%${nombreMuni}%`, `%${cultivo}%`]),
     ]);
-    aptitud         = apt.rows[0]?.clase_aptitud || null;
-    prob_deficit    = enso_q.rows[0]?.pdef != null ? parseFloat(enso_q.rows[0].pdef) : null;
-    alertasAlto     = alertas.rows[0]?.n || 0;
-    rendimientoBase = rend.rows[0]?.yhat != null ? parseFloat(rend.rows[0].yhat) : null;
+    const nombre = cult.rows[0]?.nombre_cultivo || "";
+    const permanente = cult.rows[0]?.tipo_ciclo === "permanente";
+    const aptitud = apt.rows[0]?.clase_aptitud || null;
+    const fase = enso.rows[0] || null;
+    const cal = CALENDARIO[Object.keys(CALENDARIO).find((k) => nombre.startsWith(k))];
+
+    const recomendaciones = [
+      {
+        tipo: "calendario",
+        titulo: permanente ? "Cultivo permanente" : "Ventana típica de siembra",
+        detalle: permanente
+          ? `${nombre} es un cultivo permanente: no se siembra cada semestre. Las decisiones clave son renovación, fertilización y cosecha.`
+          : cal
+            ? `En el semestre ${semestre}, la siembra de ${nombre.toLowerCase()} suele hacerse en ${cal[semestre].join(" y ")}.`
+            : `No tenemos un calendario específico para ${nombre.toLowerCase()}. Consulta con un asistente técnico local.`,
+        fuente: "Calendario agrícola típico (referencia general)",
+      },
+      {
+        tipo: "suelo",
+        alerta: aptitud === "no_apta" || aptitud === "marginal",
+        titulo: "Aptitud del suelo",
+        detalle: aptitud ? APTITUD_TXT[aptitud] : "La UPRA no tiene clasificación de aptitud para este cultivo en este municipio.",
+        fuente: "UPRA · SIPRA",
+      },
+      {
+        tipo: "clima",
+        alerta: fase?.fase_enso && fase.fase_enso !== "Neutro",
+        titulo: "El Niño / La Niña hoy",
+        detalle: fase ? ENSO_TXT[fase.fase_enso] || `Fase actual: ${fase.fase_enso}.` : "Sin dato reciente de la fase ENSO.",
+        fuente: fase ? `NOAA · último dato: ${fase.nombre_mes?.toLowerCase()} de ${fase.anio}` : "NOAA",
+      },
+    ];
+
+    return Response.json({ fromDB: true, cultivo: nombre, aptitud, enso: fase?.fase_enso || null, recomendaciones });
   } catch (err) {
-    console.error("[recomendacion] DB error:", err.message);
+    return errorBD("recomendacion", err);
   }
-
-  const ventana = ventanaPorCultivo(cultivo, enso);
-  const fert    = dosisFertilizante(aptitud, prob_deficit);
-  const ensoAdj = enso === "El Niño" ? -0.5 : enso === "La Niña" ? 0.3 : 0;
-  const lluviaAdj = lluvia === "Déficit" ? -0.4 : lluvia === "Exceso" ? -0.2 : 0;
-  const proyectado = rendimientoBase != null ? +(rendimientoBase + ensoAdj + lluviaAdj).toFixed(2) : null;
-
-  const recomendaciones = [
-    {
-      icono: "📅",
-      titulo: "Ventana óptima de siembra",
-      detalle: `Semestre A: ${ventana.semestreA.join(" / ")} · Semestre B: ${ventana.semestreB.join(" / ")}.`,
-      ajuste:  ventana.ajusteEnso,
-    },
-    {
-      icono: "🌱",
-      titulo: "Dosis sugerida de fertilizante nitrogenado",
-      detalle: `${fert.nitrogenado_kg_ha} kg/ha (base ${fert.desglose.base_aptitud} + ajuste ${fert.desglose.ajuste_deficit}).`,
-      ajuste:  fert.nota,
-    },
-    {
-      icono: alertasAlto > 0 ? "⚠️" : "✅",
-      titulo: "Riesgo de plagas y eventos extremos",
-      detalle: alertasAlto > 0
-        ? `${alertasAlto} alertas de riesgo ALTO activas en ${nombreMuni}.`
-        : "No hay alertas activas de riesgo alto registradas en la zona.",
-      ajuste:  alertasAlto > 0
-        ? "Revisa monitoreo fitosanitario y plan de contingencia hídrica antes de sembrar."
-        : "Manten el monitoreo rutinario; condiciones favorables al inicio.",
-    },
-    {
-      icono: "💧",
-      titulo: "Manejo del agua según ENSO",
-      detalle: enso === "El Niño"
-        ? "Riego suplementario recomendado en floración y llenado de grano."
-        : enso === "La Niña"
-          ? "Refuerza drenaje y obras anti-encharcamiento en lotes bajos."
-          : "Sin ajustes mayores: monitorea pronóstico mensual.",
-      ajuste:  prob_deficit != null
-        ? `Probabilidad de déficit hídrico promedio últimos 2 años: ${(prob_deficit * 100).toFixed(0)}%.`
-        : "Sin histórico ENSO suficiente para una probabilidad puntual.",
-    },
-  ];
-
-  return Response.json({
-    municipio:           nombreMuni,
-    cultivo,
-    escenario:           { enso, lluvia },
-    aptitud_sipra:       aptitud,
-    rendimiento_base:    rendimientoBase,
-    rendimiento_proyectado: proyectado,
-    alertas_alto:        alertasAlto,
-    recomendaciones,
-  });
 }
