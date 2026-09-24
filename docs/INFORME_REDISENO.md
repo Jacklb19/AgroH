@@ -76,7 +76,8 @@ Este documento describe **todo** lo que se cambió, por qué y cómo trasladarlo
 | `4aa8775` | Rediseño de la web: rutas reales, nuevo Inicio, Predicción, Explorar datos, Asistente, Cómo funciona; eliminación de contenido falso; CSS reescrito. Integra los 13 commits de `main` (Groq, botón "Escuchar", vecinos, Economía). |
 | `58f9de3` | Modelo de pronóstico, corrección de datos, APIs conectadas al modelo, asistente reescrito, pruebas. |
 | `9d61b4e` | Migración SQL 002 (rendimiento + vista de Power BI) y su reversión. |
-| (este informe) | `docs/INFORME_REDISENO.md` |
+| `f6a1efa` | Este informe (`docs/INFORME_REDISENO.md`) y ajuste de texto del asistente. |
+| `2ea2d78` | Asistente: modelo de Groq por defecto disponible (`openai/gpt-oss-20b`) y respaldo automático ante 404. |
 
 ---
 
