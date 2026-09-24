@@ -1,5 +1,8 @@
 import pool from "@/lib/db";
 
+/* Revalida cada hora: evita que la respuesta quede congelada en el build. */
+export const revalidate = 3600;
+
 export async function GET() {
   try {
     const { rows } = await pool.query(`

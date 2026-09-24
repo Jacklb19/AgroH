@@ -1,64 +1,65 @@
 "use client";
 
-export default function DualLineChart({ height = 280, data = null }) {
-  let real, pred, anios;
-  if (Array.isArray(data) && data.length > 0) {
-    anios = data.map((d) => d.anio);
-    real  = data.map((d) => d.real).filter((v) => v != null);
-    pred  = data.map((d) => d.predicho ?? null);
-  } else {
-    real  = [3.4, 3.5, 3.7, 3.6, 3.9, 4.1, 4.2, 4.0, 4.3, 4.6, 4.8];
-    pred  = [3.45, 3.55, 3.65, 3.7, 3.85, 4.05, 4.15, 4.1, 4.35, 4.55, 4.78, 4.9, 5.05];
-    anios = Array.from({ length: pred.length }, (_, i) => 2015 + i);
-  }
-  const w = 620, h = height, pad = { l: 40, r: 28, t: 28, b: 36 };
-  const allVals = [...real, ...pred].filter((v) => v != null && !Number.isNaN(v));
-  const minY = Math.max(0, Math.floor(Math.min(...allVals, 3.2) * 10) / 10 - 0.2);
-  const maxY = Math.ceil(Math.max(...allVals, 5.2) * 10) / 10 + 0.2;
-  const xs1 = real.map((_, i) => pad.l + (i * (w - pad.l - pad.r)) / (pred.length - 1));
-  const ys1 = real.map((v) => pad.t + (1 - (v - minY) / (maxY - minY)) * (h - pad.t - pad.b));
-  const xs2 = pred.map((_, i) => pad.l + (i * (w - pad.l - pad.r)) / (pred.length - 1));
-  const ys2 = pred.map((v) => pad.t + (1 - (v - minY) / (maxY - minY)) * (h - pad.t - pad.b));
-  const realPath = xs1.map((x, i) => `${i === 0 ? "M" : "L"}${x} ${ys1[i]}`).join(" ");
-  const predPath = xs2.map((x, i) => `${i === 0 ? "M" : "L"}${x} ${ys2[i]}`).join(" ");
-  const forecastStart = xs2[real.length - 1];
+/* Rendimiento real (línea continua) vs. predicho (discontinua) por año.
+   `data`: [{ anio, real|null, predicho|null }]. Los años sin valor se saltan
+   sin desalinear el eje X. */
+export default function DualLineChart({ height = 280, data = [] }) {
+  const rows = (Array.isArray(data) ? data : []).filter((d) => d.real != null || d.predicho != null);
+  if (rows.length < 2) return <div className="chart-empty">Sin serie suficiente para graficar.</div>;
+
+  const w = 620, h = height, pad = { l: 40, r: 20, t: 34, b: 30 };
+  const vals = rows.flatMap((d) => [d.real, d.predicho]).filter((v) => v != null);
+  const minY = Math.floor((Math.min(...vals) - 0.2) * 2) / 2;
+  const maxY = Math.ceil((Math.max(...vals) + 0.2) * 2) / 2;
+  const x = (i) => pad.l + (i * (w - pad.l - pad.r)) / (rows.length - 1);
+  const y = (v) => pad.t + (1 - (v - minY) / (maxY - minY)) * (h - pad.t - pad.b);
+
+  const path = (key) => {
+    let d = "", pen = false;
+    rows.forEach((r, i) => {
+      if (r[key] == null) { pen = false; return; }
+      d += `${pen ? "L" : "M"}${x(i).toFixed(1)} ${y(r[key]).toFixed(1)} `;
+      pen = true;
+    });
+    return d.trim();
+  };
+
+  const lastReal = rows.reduce((acc, r, i) => (r.real != null ? i : acc), -1);
+  const forecastX = lastReal >= 0 && lastReal < rows.length - 1 ? x(lastReal) : null;
+  const step = (maxY - minY) / 4;
+  const ticks = [0, 1, 2, 3, 4].map((k) => minY + k * step);
+  const labelEvery = Math.ceil(rows.length / 6);
+
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} style={{ display: "block" }}>
-      <defs>
-        <linearGradient id="forecastFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#1e4d7b" stopOpacity="0.10" />
-          <stop offset="100%" stopColor="#1e4d7b" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <rect x={forecastStart} y={pad.t} width={xs2[xs2.length - 1] - forecastStart} height={h - pad.t - pad.b} fill="url(#forecastFill)" />
-      <text x={forecastStart + 6} y={pad.t + 12} fontSize="10" fill="#1e4d7b" fontFamily="ui-monospace, monospace" letterSpacing="0.06em">PRONÓSTICO</text>
-      {[3.5, 4.0, 4.5, 5.0].map((v, i) => {
-        const y = pad.t + (1 - (v - minY) / (maxY - minY)) * (h - pad.t - pad.b);
-        return (
-          <g key={i}>
-            <line x1={pad.l} x2={w - pad.r} y1={y} y2={y} stroke="#e5e7eb" strokeDasharray="2 4" />
-            <text x={pad.l - 8} y={y + 3} fontSize="10" fill="#9ca3af" textAnchor="end" fontFamily="ui-monospace, monospace">{v.toFixed(1)}</text>
-          </g>
-        );
-      })}
-      {[0, Math.floor(pred.length / 3), Math.floor((pred.length * 2) / 3), pred.length - 1]
-        .filter((i, k, arr) => i >= 0 && i < pred.length && arr.indexOf(i) === k)
-        .map((i) => (
-          <text key={i} x={xs2[i]} y={h - 12} fontSize="10" fill="#9ca3af" textAnchor="middle" fontFamily="ui-monospace, monospace">
-            {anios[i] ?? 2015 + i}
-          </text>
-        ))}
-      <path d={predPath} fill="none" stroke="#1e4d7b" strokeWidth="2" strokeDasharray="5 4" strokeLinejoin="round" />
-      <path d={realPath} fill="none" stroke="#1a7a4a" strokeWidth="2.5" strokeLinejoin="round" />
-      {xs1.map((x, i) => (
-        <circle key={i} cx={x} cy={ys1[i]} r="3" fill="#1a7a4a" stroke="white" strokeWidth="1" />
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} style={{ display: "block" }} role="img"
+      aria-label="Rendimiento real frente a predicho por año">
+      {forecastX != null && (
+        <>
+          <rect x={forecastX} y={pad.t} width={w - pad.r - forecastX} height={h - pad.t - pad.b} fill="#1e4d7b" opacity="0.06" />
+          <text x={forecastX + 6} y={pad.t + 12} fontSize="10" fill="#1e4d7b" fontFamily="ui-monospace, monospace">PRONÓSTICO</text>
+        </>
+      )}
+      {ticks.map((v) => (
+        <g key={v}>
+          <line x1={pad.l} x2={w - pad.r} y1={y(v)} y2={y(v)} stroke="#e5e7eb" strokeDasharray="2 4" />
+          <text x={pad.l - 8} y={y(v) + 3} fontSize="10" fill="#6b7280" textAnchor="end" fontFamily="ui-monospace, monospace">{v.toFixed(1)}</text>
+        </g>
+      ))}
+      {rows.map((r, i) => (i % labelEvery === 0 || i === rows.length - 1) && (
+        <text key={r.anio} x={x(i)} y={h - 10} fontSize="10" fill="#6b7280" textAnchor="middle" fontFamily="ui-monospace, monospace">{r.anio}</text>
+      ))}
+      <path d={path("predicho")} fill="none" stroke="#1e4d7b" strokeWidth="2" strokeDasharray="5 4" strokeLinejoin="round" />
+      <path d={path("real")} fill="none" stroke="#1a7a4a" strokeWidth="2.5" strokeLinejoin="round" />
+      {rows.map((r, i) => r.real != null && (
+        <circle key={i} cx={x(i)} cy={y(r.real)} r="3" fill="#1a7a4a" stroke="white" strokeWidth="1">
+          <title>{`${r.anio}: real ${r.real} t/ha${r.predicho != null ? ` · predicho ${r.predicho}` : ""}`}</title>
+        </circle>
       ))}
       <g transform={`translate(${pad.l}, 14)`}>
-        <rect x="-4" y="-10" width="160" height="18" rx="9" fill="white" stroke="#e5e7eb" />
-        <line x1="6" x2="20" y1="0" y2="0" stroke="#1a7a4a" strokeWidth="2.5" />
-        <text x="26" y="4" fontSize="11" fill="#374151" fontWeight="500">Real</text>
-        <line x1="78" x2="92" y1="0" y2="0" stroke="#1e4d7b" strokeWidth="2" strokeDasharray="5 4" />
-        <text x="98" y="4" fontSize="11" fill="#374151" fontWeight="500">Predicho</text>
+        <line x1="0" x2="16" y1="0" y2="0" stroke="#1a7a4a" strokeWidth="2.5" />
+        <text x="22" y="4" fontSize="11" fill="#374151">Real</text>
+        <line x1="66" x2="82" y1="0" y2="0" stroke="#1e4d7b" strokeWidth="2" strokeDasharray="5 4" />
+        <text x="88" y="4" fontSize="11" fill="#374151">Predicho</text>
       </g>
     </svg>
   );

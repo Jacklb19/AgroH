@@ -1,5 +1,8 @@
 import pool from "@/lib/db";
 
+/* Revalida cada 5 min: evita que la respuesta quede congelada en el build. */
+export const revalidate = 300;
+
 const FALLBACK = {
   fromDB: false,
   alertas_por_tipo: [

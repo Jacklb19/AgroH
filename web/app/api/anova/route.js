@@ -1,6 +1,9 @@
 import fs from "fs/promises";
 import path from "path";
 
+/* Revalida cada 5 min: evita que la respuesta quede congelada en el build. */
+export const revalidate = 300;
+
 export async function GET() {
   try {
     const csvPath = path.resolve(process.cwd(), "..", "data", "quality_reports", "anova_resumen.csv");

@@ -1,5 +1,8 @@
 import pool from "@/lib/db";
 
+/* Revalida cada 5 min: evita que la respuesta quede congelada en el build. */
+export const revalidate = 300;
+
 const FALLBACK = [
   { lat:  4.43, lon: -75.23, riesgo: "MEDIO" },
   { lat:  4.16, lon: -74.88, riesgo: "BAJO"  },
@@ -29,15 +32,18 @@ export async function GET() {
       ORDER BY random()
       LIMIT 80
     `);
-    return Response.json(rows.map((r) => ({
-      municipio:    r.nombre_municipio,
-      departamento: r.nombre_departamento,
-      lat:          parseFloat(r.lat),
-      lon:          parseFloat(r.lon),
-      riesgo:       r.riesgo,
-    })));
+    return Response.json({
+      fromDB: true,
+      puntos: rows.map((r) => ({
+        municipio:    r.nombre_municipio,
+        departamento: r.nombre_departamento,
+        lat:          parseFloat(r.lat),
+        lon:          parseFloat(r.lon),
+        riesgo:       r.riesgo,
+      })),
+    });
   } catch (err) {
     console.error("[mapa] DB error:", err.message);
-    return Response.json(FALLBACK);
+    return Response.json({ fromDB: false, puntos: FALLBACK });
   }
 }

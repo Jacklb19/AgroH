@@ -1,5 +1,8 @@
 import pool from "@/lib/db";
 
+/* Revalida cada 5 min: evita que la respuesta quede congelada en el build. */
+export const revalidate = 300;
+
 const FUENTES = [
   { id: "uejq-wxrr", titulo: "Producción Agrícola Municipal A04/A05", entidad: "MinAgricultura", uri: "https://www.datos.gov.co/resource/uejq-wxrr.json", tabla: "fact_produccion_agricola", estrategico: true },
   { id: "y5zy-x4ky", titulo: "Precios de Insumos Agrícolas (IPIA)",   entidad: "DANE / UPRA",     uri: "https://www.datos.gov.co/resource/y5zy-x4ky.json", tabla: "fact_precios_insumos",   estrategico: true },

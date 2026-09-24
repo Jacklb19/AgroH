@@ -1,5 +1,8 @@
 import pool from "@/lib/db";
 
+/* Revalida cada 5 min: evita que la respuesta quede congelada en el build. */
+export const revalidate = 300;
+
 const FALLBACK = {
   municipios_cubiertos:    1122,
   cultivos_monitoreados:   87,

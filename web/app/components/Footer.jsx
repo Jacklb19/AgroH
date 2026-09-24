@@ -1,42 +1,48 @@
-"use client";
+import Link from "next/link";
+import { REPO_URL, DOCS_URL } from "@/lib/content";
 
-export default function Footer({ onNav }) {
+const FUENTES = [
+  { label: "datos.gov.co", href: "https://www.datos.gov.co" },
+  { label: "DANE",         href: "https://www.dane.gov.co" },
+  { label: "IDEAM",        href: "https://www.ideam.gov.co" },
+  { label: "UPRA",         href: "https://www.upra.gov.co" },
+  { label: "NOAA · ENSO",  href: "https://www.cpc.ncep.noaa.gov/" },
+];
+
+export default function Footer() {
   return (
     <footer className="footer">
       <div className="container">
         <div className="footer-grid">
           <div>
-            <div className="footer-brand">
-              <span className="mark">A</span>
-              AgroIA Colombia
-            </div>
+            <div className="footer-brand">AgroIA Colombia</div>
             <p className="footer-tagline">
-              Plataforma de inteligencia agroclimática con datos abiertos. Una solución madura, aplicable y auditable para el sector agropecuario colombiano.
+              Predicción de rendimientos y riesgo climático para el agro colombiano, construida solo con datos abiertos.
             </p>
           </div>
           <div className="footer-col">
             <h5>Plataforma</h5>
-            <a onClick={() => onNav("inicio")}>Inicio</a>
-            <a onClick={() => onNav("dashboards")}>Dashboards</a>
-            <a onClick={() => onNav("prediccion")}>Predicción</a>
-            <a onClick={() => onNav("impacto")}>Impacto</a>
+            <Link href="/prediccion">Predicción</Link>
+            <Link href="/datos">Explorar datos</Link>
+            <Link href="/asistente">Asistente</Link>
+            <Link href="/metodologia">Cómo funciona</Link>
           </div>
           <div className="footer-col">
-            <h5>Equipo</h5>
-            <a onClick={() => onNav("metodologia")}>Metodología</a>
-            <a>Repositorio</a>
+            <h5>Proyecto</h5>
+            <a href={REPO_URL} target="_blank" rel="noopener noreferrer">Código en GitHub</a>
+            <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">Documentación</a>
+            <a href="/api/openapi" target="_blank" rel="noopener noreferrer">API pública</a>
           </div>
           <div className="footer-col">
-            <h5>Fuentes</h5>
-            <a>DANE</a>
-            <a>IDEAM</a>
-            <a>UPRA</a>
-            <a>SIPSA</a>
+            <h5>Fuentes de datos</h5>
+            {FUENTES.map((f) => (
+              <a key={f.label} href={f.href} target="_blank" rel="noopener noreferrer">{f.label}</a>
+            ))}
           </div>
         </div>
         <div className="footer-bottom">
-          <span>© 2026 AgroIA Colombia · Datos abiertos</span>
-          <span>v1.4.2 · build 2026.04.28</span>
+          <span>© 2026 AgroIA Colombia · Proyecto académico de Ciencia de Datos</span>
+          <span>Hecho con datos abiertos</span>
         </div>
       </div>
     </footer>

@@ -1,74 +1,82 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Fragment } from "react";
 import { Icon } from "./icons";
+import { SectionHead } from "./ui";
 
-const SUGERENCIAS = [
-  "¿Cuál es el panorama general del sistema?",
-  "¿Cuál es el mejor municipio para arroz?",
-  "Muéstrame las alertas de riesgo ALTO",
-  "Compara Espinal y Saldaña en rendimiento",
-  "¿Qué pasa si hay El Niño en Pasto con maíz?",
-  "¿Qué cultivo me recomiendas para Manizales?",
-  "¿Cómo está el clima en Ibagué?",
-  "Proyecta café en Armenia con sequía",
+const IDEAS = [
+  { tema: "Rendimiento", icon: Icon.wheat, preguntas: [
+    "¿Cuál es el mejor municipio para arroz?",
+    "Compara Espinal y Saldaña en rendimiento",
+  ] },
+  { tema: "Riesgo y clima", icon: Icon.cloudRain, preguntas: [
+    "Muéstrame las alertas de riesgo alto",
+    "¿Cómo está el clima en Ibagué?",
+  ] },
+  { tema: "Escenarios", icon: Icon.sliders, preguntas: [
+    "¿Qué pasa si hay El Niño en Pasto con maíz?",
+    "Proyecta café en Armenia con sequía",
+  ] },
+  { tema: "Qué sembrar", icon: Icon.sprout, preguntas: [
+    "¿Qué cultivo me recomiendas para Manizales?",
+    "¿Cuál es el panorama general del sistema?",
+  ] },
 ];
 
-function BotIcon() {
-  return (
-    <div className="chat-avatar bot">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-        <line x1="12" y1="3" x2="12" y2="7"/>
-        <circle cx="8.5" cy="16" r="1.5" fill="currentColor" stroke="none"/>
-        <circle cx="15.5" cy="16" r="1.5" fill="currentColor" stroke="none"/>
-      </svg>
-    </div>
+const CAPACIDADES = [
+  "Consultar el rendimiento esperado por municipio y cultivo",
+  "Comparar de 2 a 5 municipios",
+  "Proyectar escenarios de El Niño, La Niña o sequía",
+  "Recomendar cultivos para una zona",
+  "Listar alertas climáticas y clima histórico",
+];
+
+/* Formato mínimo para las respuestas: **negrita**, listas con "-", "•" o "1." */
+function inline(text) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**") ? <strong key={i}>{part.slice(2, -2)}</strong> : <Fragment key={i}>{part}</Fragment>
   );
 }
 
-function TypingDots() {
-  return (
-    <div className="chat-bubble ai">
-      <BotIcon />
-      <div className="bubble-body typing-dots">
-        <span /><span /><span />
-      </div>
-    </div>
+function RichText({ text }) {
+  const blocks = [];
+  let list = null;
+  text.split("\n").forEach((raw, i) => {
+    const line = raw.trim();
+    const item = line.match(/^(?:[-•*]|\d+[.)])\s+(.*)$/);
+    if (item) {
+      if (!list) { list = []; blocks.push({ type: "ul", items: list, key: i }); }
+      list.push(item[1]);
+      return;
+    }
+    list = null;
+    if (line) blocks.push({ type: "p", text: line.replace(/^#+\s*/, ""), key: i });
+  });
+  return blocks.map((b) =>
+    b.type === "ul"
+      ? <ul key={b.key}>{b.items.map((it, j) => <li key={j}>{inline(it)}</li>)}</ul>
+      : <p key={b.key}>{inline(b.text)}</p>
   );
+}
+
+function BotAvatar() {
+  return <div className="chat-avatar bot"><Icon.sparkles size={16} /></div>;
 }
 
 function Mensaje({ msg, onHablar, hablando }) {
   const isUser = msg.role === "user";
   return (
     <div className={`chat-bubble ${isUser ? "user" : "ai"}`}>
-      {!isUser && <BotIcon />}
+      {!isUser && <BotAvatar />}
       <div className="bubble-body">
-        {msg.content.split("\n").map((line, i) => (
-          <span key={i}>
-            {line}
-            {i < msg.content.split("\n").length - 1 && <br />}
-          </span>
-        ))}
+        {isUser ? msg.content : <RichText text={msg.content} />}
         {!isUser && onHablar && (
           <button
             type="button"
-            className={`chat-speak${hablando ? " active" : ""}`}
+            className={`chat-speak ${hablando ? "active" : ""}`}
             onClick={onHablar}
-            title={hablando ? "Detener lectura" : "Escuchar respuesta"}
             aria-label={hablando ? "Detener lectura" : "Escuchar respuesta"}
           >
-            {hablando ? (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                <rect x="6" y="6" width="12" height="12" rx="2"/>
-              </svg>
-            ) : (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-              </svg>
-            )}
+            {hablando ? <Icon.stop size={12} /> : <Icon.volume size={13} />}
             {hablando ? "Detener" : "Escuchar"}
           </button>
         )}
@@ -87,34 +95,31 @@ export default function PageAsistente() {
   /* ── Sesión persistente (memoria en BD) ─────────────────────────── */
   const [sessionId, setSessionId] = useState(null);
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    let sid = localStorage.getItem("agroia_chat_session");
+    let sid = null;
+    try { sid = localStorage.getItem("agroia_chat_session"); } catch {}
     if (!sid) {
-      sid = (crypto.randomUUID && crypto.randomUUID()) ||
-            `s-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      localStorage.setItem("agroia_chat_session", sid);
+      sid = (crypto.randomUUID && crypto.randomUUID()) || `s-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      try { localStorage.setItem("agroia_chat_session", sid); } catch {}
     }
     setSessionId(sid);
   }, []);
 
-  /* ── Reconocimiento de voz (Web Speech API) ─────────────────────── */
-  const [escuchando,   setEscuchando]   = useState(false);
+  /* ── Voz (Web Speech API) ───────────────────────────────────────── */
+  const [escuchando, setEscuchando]       = useState(false);
   const [vozDisponible, setVozDisponible] = useState(false);
+  const [ttsDisponible, setTtsDisponible] = useState(false);
   const recognitionRef = useRef(null);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    setTtsDisponible(!!window.speechSynthesis);
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
     setVozDisponible(true);
     const rec = new SR();
-    rec.lang           = "es-CO";
-    rec.continuous     = false;
+    rec.lang = "es-CO";
+    rec.continuous = false;
     rec.interimResults = true;
-    rec.onresult = (e) => {
-      const txt = Array.from(e.results).map((r) => r[0].transcript).join("");
-      setInput(txt);
-    };
+    rec.onresult = (e) => setInput(Array.from(e.results).map((r) => r[0].transcript).join(""));
     rec.onend   = () => setEscuchando(false);
     rec.onerror = () => setEscuchando(false);
     recognitionRef.current = rec;
@@ -132,8 +137,7 @@ export default function PageAsistente() {
   const [hablandoIdx, setHablandoIdx] = useState(null);
 
   const toggleHablar = (texto, idx) => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    /* si ya está leyendo este mensaje → detener */
+    if (!window.speechSynthesis) return;
     if (hablandoIdx === idx) {
       window.speechSynthesis.cancel();
       setHablandoIdx(null);
@@ -141,9 +145,8 @@ export default function PageAsistente() {
     }
     const limpio = String(texto || "").replace(/[*_`>#]/g, "").slice(0, 600);
     const u = new SpeechSynthesisUtterance(limpio);
-    u.lang  = "es-CO";
-    u.rate  = 1.05;
-    u.pitch = 1;
+    u.lang = "es-CO";
+    u.rate = 1.05;
     u.onend   = () => setHablandoIdx(null);
     u.onerror = () => setHablandoIdx(null);
     window.speechSynthesis.cancel();
@@ -151,10 +154,8 @@ export default function PageAsistente() {
     setHablandoIdx(idx);
   };
 
-  /* detener la voz al desmontar la página */
-  useEffect(() => {
-    return () => { try { window.speechSynthesis?.cancel(); } catch {} };
-  }, []);
+  /* detener la voz al salir de la página */
+  useEffect(() => () => { try { window.speechSynthesis?.cancel(); } catch {} }, []);
 
   useEffect(() => {
     const el = messagesRef.current;
@@ -165,33 +166,24 @@ export default function PageAsistente() {
     const txt = (texto || input).trim();
     if (!txt || loading) return;
 
-    const userMsg  = { role: "user", content: txt };
-    const newMsgs  = [...messages, userMsg];
+    const newMsgs = [...messages, { role: "user", content: txt }];
     setMessages(newMsgs);
     setInput("");
     setLoading(true);
 
     try {
-      const res = await fetch("/api/chat", {
-        method:  "POST",
+      const res  = await fetch("/api/chat", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ messages: newMsgs, sessionId }),
+        body: JSON.stringify({ messages: newMsgs, sessionId }),
       });
       const data = await res.json();
-      let reply;
-      if (data.reply) {
-        reply = data.reply;
-      } else if (data.error) {
-        reply = `⚠ ${data.error}${data.hint ? `\n\n💡 ${data.hint}` : ""}${data.model_intentado ? `\n\nModelo intentado: ${data.model_intentado}` : ""}`;
-      } else {
-        reply = "Sin respuesta del servidor.";
-      }
+      const reply = data.reply
+        || (data.error ? "El asistente no está disponible en este momento. Inténtalo de nuevo más tarde." : "No recibimos respuesta del servidor.");
+      if (data.error) console.warn("[asistente]", data.error, data.hint || "");
       setMessages([...newMsgs, { role: "assistant", content: reply }]);
     } catch {
-      setMessages([...newMsgs, {
-        role:    "assistant",
-        content: "Error de conexión. Verifica que el servidor esté activo.",
-      }]);
+      setMessages([...newMsgs, { role: "assistant", content: "Error de conexión. Revisa tu internet e inténtalo de nuevo." }]);
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -202,105 +194,71 @@ export default function PageAsistente() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); }
   };
 
-  const vaciar = () => { if (!loading) setMessages([]); };
-
   return (
-    <section className="section">
+    <section className="section page-top">
       <div className="container">
-
-        {/* Encabezado */}
-        <div className="section-head">
-          <span className="eyebrow blue">Asistente · Claude Sonnet 4.6 </span>
-          <h2>Consulta la base de datos en lenguaje natural</h2>
-          <p>Pregunta sobre predicciones, alertas climáticas, ranking de municipios o estadísticas generales. El asistente consulta la BD real y responde con datos concretos.</p>
-        </div>
+        <SectionHead eyebrow="Asistente con IA" tone="blue" title="Pregunta como le preguntarías a un asesor">
+          Escribe o dicta tu pregunta sobre rendimientos, alertas, clima o qué sembrar. El asistente consulta los
+          datos de la plataforma y responde en lenguaje sencillo.
+        </SectionHead>
 
         <div className="chat-layout">
-
-          {/* Panel lateral de info */}
           <aside className="chat-sidebar">
             <div className="chat-sidebar-card">
-              <div className="cs-title">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-                Qué puedes preguntar
-              </div>
+              <div className="cs-title"><Icon.sparkles size={14} /> Qué puede hacer</div>
               <ul className="cs-list">
-                <li>Rendimiento predicho (XGBoost) por municipio y cultivo</li>
-                <li>Comparar 2–5 municipios lado a lado</li>
-                <li>Proyectar escenarios El Niño / La Niña / sequía</li>
-                <li>Recomendar cultivos óptimos para una zona</li>
-                <li>Alertas climáticas y ranking por riesgo</li>
-                <li>Datos climáticos históricos (lluvia, temperatura)</li>
-                <li>Panorama general del sistema</li>
+                {CAPACIDADES.map((c) => <li key={c}>{c}</li>)}
               </ul>
             </div>
-
-            <div className="chat-sidebar-card">
-              <div className="cs-title">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-                </svg>
-                Tablas disponibles
-              </div>
-              <ul className="cs-list mono">
-                <li>pred_rendimiento</li>
-                <li>pred_alerta_climatica</li>
-                <li>fact_produccion_agricola</li>
-                <li>fact_clima_mensual</li>
-                <li>dim_municipio · dim_cultivo</li>
-              </ul>
+            <div className="chat-sidebar-card note">
+              <div className="cs-title"><Icon.info size={14} /> Ten en cuenta</div>
+              <p>
+                Las respuestas se basan en los datos de AgroIA y pueden contener errores. Úsalas como orientación y
+                confírmalas con un asistente técnico antes de tomar decisiones importantes.
+              </p>
             </div>
           </aside>
 
-          {/* Área principal del chat */}
           <div className="chat-main">
-
-            <div className="chat-messages" ref={messagesRef}>
-              {/* Estado vacío con sugerencias */}
+            <div className="chat-messages" ref={messagesRef} aria-live="polite">
               {messages.length === 0 && !loading && (
                 <div className="chat-empty">
-                  <div className="chat-empty-icon">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                      <circle cx="8.5" cy="16" r="1.5" fill="currentColor" stroke="none"/>
-                      <circle cx="15.5" cy="16" r="1.5" fill="currentColor" stroke="none"/>
-                    </svg>
-                  </div>
+                  <div className="chat-empty-icon"><Icon.message size={28} strokeWidth={1.6} /></div>
                   <p className="chat-empty-title">¿En qué te ayudo hoy?</p>
-                  <p className="chat-empty-sub">Puedes usar una sugerencia o escribir tu propia pregunta.</p>
-                  <div className="chat-chips">
-                    {SUGERENCIAS.map((s) => (
-                      <button key={s} className="chat-chip" onClick={() => enviar(s)}>
-                        {s}
-                      </button>
+                  <p className="chat-empty-sub">Elige una pregunta de ejemplo o escribe la tuya.</p>
+                  <div className="idea-groups">
+                    {IDEAS.map((g) => (
+                      <div key={g.tema} className="idea-group">
+                        <div className="idea-title"><g.icon size={14} /> {g.tema}</div>
+                        {g.preguntas.map((q) => (
+                          <button key={q} className="chat-chip" onClick={() => enviar(q)}>{q}</button>
+                        ))}
+                      </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Mensajes */}
               {messages.map((m, i) => (
                 <Mensaje
                   key={i}
                   msg={m}
                   hablando={hablandoIdx === i}
-                  onHablar={m.role === "assistant" ? () => toggleHablar(m.content, i) : undefined}
+                  onHablar={m.role === "assistant" && ttsDisponible ? () => toggleHablar(m.content, i) : undefined}
                 />
               ))}
-              {loading && <TypingDots />}
+              {loading && (
+                <div className="chat-bubble ai">
+                  <BotAvatar />
+                  <div className="bubble-body typing-dots"><span /><span /><span /></div>
+                </div>
+              )}
             </div>
 
-            {/* Input */}
             <div className="chat-input-wrap">
               {messages.length > 0 && (
-                <button className="chat-clear" onClick={vaciar} title="Nueva conversación">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/>
-                  </svg>
-                  Nueva conversación
+                <button className="chat-clear" onClick={() => !loading && setMessages([])}>
+                  <Icon.refresh /> Nueva conversación
                 </button>
               )}
               <div className="chat-input-row">
@@ -308,7 +266,8 @@ export default function PageAsistente() {
                   ref={inputRef}
                   className="chat-input"
                   rows={1}
-                  placeholder={escuchando ? "Escuchando…" : "Escribe o pulsa el micrófono…"}
+                  aria-label="Tu pregunta"
+                  placeholder={escuchando ? "Escuchando…" : "Escribe tu pregunta…"}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={onKey}
@@ -318,37 +277,21 @@ export default function PageAsistente() {
                   <button
                     type="button"
                     onClick={toggleVoz}
-                    title={escuchando ? "Detener" : "Hablar"}
-                    aria-label={escuchando ? "Detener escucha" : "Iniciar escucha"}
-                    className="chat-send"
-                    style={{
-                      background: escuchando ? "#dc2626" : "#1e4d7b",
-                      animation: escuchando ? "pulse 1.2s infinite" : "none",
-                    }}
+                    aria-label={escuchando ? "Detener dictado" : "Dictar pregunta"}
+                    title={escuchando ? "Detener dictado" : "Dictar pregunta"}
+                    className={`chat-send mic ${escuchando ? "listening" : ""}`}
                   >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
-                      <path d="M19 11a7 7 0 0 1-14 0"/>
-                      <line x1="12" y1="18" x2="12" y2="22"/>
-                      <line x1="8"  y1="22" x2="16" y2="22"/>
-                    </svg>
+                    <Icon.mic />
                   </button>
                 )}
-                <button
-                  className="chat-send"
-                  onClick={() => enviar()}
-                  disabled={!input.trim() || loading}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                  </svg>
+                <button className="chat-send" onClick={() => enviar()} disabled={!input.trim() || loading} aria-label="Enviar">
+                  <Icon.send />
                 </button>
               </div>
               <p className="chat-hint">
-                Enter para enviar · Shift+Enter para nueva línea · {vozDisponible ? "🎤 voz disponible (es-CO)" : "consulta la BD real"}
+                Enter para enviar · Shift + Enter para nueva línea{vozDisponible ? " · puedes dictar con el micrófono" : ""}
               </p>
             </div>
-
           </div>
         </div>
       </div>

@@ -36,7 +36,7 @@ const SPEC = {
     "/mapa": {
       get: {
         tags: ["Datos"], summary: "Top 80 municipios con coordenadas y nivel de riesgo",
-        responses: { "200": { description: "Array de puntos { municipio, lat, lon, riesgo }" } },
+        responses: { "200": { description: "{ fromDB, puntos: [{ municipio, departamento, lat, lon, riesgo }] }" } },
       },
     },
     "/catalogo": {
@@ -89,6 +89,16 @@ const SPEC = {
         responses: { "200": { description: "yhat, low, high, risk, shap[]" } },
       },
     },
+    "/comparativo": {
+      get: {
+        tags: ["Predicción"], summary: "Rendimiento predicho del mismo cultivo en otros municipios del departamento",
+        parameters: [
+          { name: "muni",    in: "query", required: true, schema: { type: "string" }, description: "'Municipio, Departamento'" },
+          { name: "cultivo", in: "query", required: true, schema: { type: "string" } },
+        ],
+        responses: { "200": { description: "{ fromDB, departamento, filas: [{ municipio, rendimiento, riesgo, vs_hist_pct, actual }] }" } },
+      },
+    },
     "/recomendacion": {
       post: {
         tags: ["Predicción"], summary: "Recomendación accionable (calendario + dosis + plagas + agua)",
@@ -114,7 +124,7 @@ const SPEC = {
     },
     "/chat": {
       post: {
-        tags: ["Asistente"], summary: "Chat con Claude Sonnet 4.6 (tool-use SQL)",
+        tags: ["Asistente"], summary: "Chat con Claude (tool-use SQL); modelo configurable con ANTHROPIC_MODEL",
         requestBody: {
           required: true,
           content: {

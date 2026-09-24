@@ -3,45 +3,24 @@ import { useState, useEffect, useRef } from "react";
 import ConfidenceBar from "./charts/ConfidenceBar";
 import GemeloDigital from "./GemeloDigital";
 import { Icon } from "./icons";
+import { SectionHead, DemoNotice, RiskBadge } from "./ui";
+import { fmtNum, signed, riesgoInfo, SEMESTRE } from "@/lib/format";
+import { labelFeature } from "@/lib/labels";
 
 /* ── Pasos del tour ─────────────────────────────────────────────────── */
 const TOUR_STEPS = [
-  {
-    refKey: "muni",
-    placement: "right",
-    title: "📍 Municipio",
-    desc: "Elige la zona de Colombia donde se va a sembrar. El modelo tiene datos reales de producción de cientos de municipios del país.",
-  },
-  {
-    refKey: "cultivo",
-    placement: "right",
-    title: "🌱 Cultivo",
-    desc: "Selecciona qué vas a sembrar: arroz, papa, maíz, café… Cada cultivo tiene un comportamiento distinto según la región y el clima.",
-  },
-  {
-    refKey: "periodo",
-    placement: "right",
-    title: "📅 Período de proyección",
-    desc: "Define el año y semestre que quieres proyectar. Semestre A = enero a junio · Semestre B = julio a diciembre.",
-  },
-  {
-    refKey: "escenarios",
-    placement: "right",
-    title: "🌦️ Escenarios climáticos",
-    desc: "Ajusta el fenómeno El Niño o La Niña si hay pronóstico activo, y el régimen de lluvias esperado. El modelo pondera cómo cada escenario afecta la cosecha históricamente.",
-  },
-  {
-    refKey: "submit",
-    placement: "top",
-    title: "🔍 Ejecutar predicción",
-    desc: "Pulsa aquí para correr el modelo XGBoost con 1.500 árboles. Obtienes rendimiento esperado, rango de confianza al 95% y nivel de riesgo en segundos.",
-  },
-  {
-    refKey: "result",
-    placement: "left",
-    title: "📊 Tus resultados aparecen aquí",
-    desc: "Verás la cosecha esperada en t/ha (toneladas por hectárea sembrada), el nivel de riesgo climático BAJO / MEDIO / ALTO, y el rango realista de producción.",
-  },
+  { refKey: "muni",       placement: "right", title: "Municipio",
+    desc: "Elige la zona donde se va a sembrar. Verás también el clima de hoy en ese municipio." },
+  { refKey: "cultivo",    placement: "right", title: "Cultivo",
+    desc: "Selecciona qué vas a sembrar: arroz, papa, maíz, café… Cada cultivo responde distinto al clima de cada región." },
+  { refKey: "periodo",    placement: "right", title: "Año y semestre",
+    desc: "Semestre A es de enero a junio y semestre B de julio a diciembre." },
+  { refKey: "escenarios", placement: "right", title: "Escenario climático (opcional)",
+    desc: "Si hay pronóstico de El Niño o La Niña, o esperas más o menos lluvia de lo normal, indícalo aquí. Si no sabes, deja los valores por defecto." },
+  { refKey: "submit",     placement: "top",   title: "Consultar",
+    desc: "El resultado aparece en segundos." },
+  { refKey: "result",     placement: "left",  title: "Tu resultado",
+    desc: "Cuántas toneladas por hectárea se esperan, el rango probable, el nivel de riesgo y los factores que más influyen." },
 ];
 
 /* ── Overlay del tour ────────────────────────────────────────────────── */
@@ -53,6 +32,7 @@ function TourOverlay({ steps, refs, onClose }) {
   useEffect(() => {
     const el = refs[current.refKey]?.current;
     if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
     const update = () => setRect(el.getBoundingClientRect());
     update();
     window.addEventListener("resize", update);
@@ -63,43 +43,31 @@ function TourOverlay({ steps, refs, onClose }) {
     };
   }, [step, current.refKey, refs]);
 
-  const PAD = 10;
-  const GAP = 22;
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
-  const spotlightStyle = rect
-    ? {
-        position: "fixed",
-        top:    rect.top  - PAD,
-        left:   rect.left - PAD,
-        width:  rect.width  + PAD * 2,
-        height: rect.height + PAD * 2,
-        borderRadius: 12,
-        boxShadow: "0 0 0 9999px rgba(11,18,32,0.72)",
-        border: "2.5px solid #22a35f",
-        zIndex: 1001,
-        pointerEvents: "none",
-        transition:
-          "top 0.32s cubic-bezier(.4,0,.2,1), left 0.32s cubic-bezier(.4,0,.2,1), width 0.32s cubic-bezier(.4,0,.2,1), height 0.32s cubic-bezier(.4,0,.2,1)",
-      }
-    : null;
+  const PAD = 10, GAP = 22;
+  const narrow = typeof window !== "undefined" && window.innerWidth < 900;
 
-  let tStyle = { position: "fixed", zIndex: 1002, width: 292 };
+  const spotlightStyle = rect && {
+    top: rect.top - PAD, left: rect.left - PAD,
+    width: rect.width + PAD * 2, height: rect.height + PAD * 2,
+  };
+
+  let tStyle = {};
   if (rect) {
-    const { placement } = current;
+    const placement = narrow ? (rect.top > window.innerHeight / 2 ? "top" : "bottom") : current.placement;
     if (placement === "right") {
-      tStyle.top       = rect.top + rect.height / 2;
-      tStyle.left      = rect.right + PAD + GAP;
-      tStyle.transform = "translateY(-50%)";
+      tStyle = { top: rect.top + rect.height / 2, left: rect.right + PAD + GAP, transform: "translateY(-50%)" };
     } else if (placement === "left") {
-      tStyle.top       = rect.top + rect.height / 2;
-      tStyle.right     = window.innerWidth - rect.left + PAD + GAP;
-      tStyle.transform = "translateY(-50%)";
+      tStyle = { top: rect.top + rect.height / 2, right: window.innerWidth - rect.left + PAD + GAP, transform: "translateY(-50%)" };
     } else if (placement === "top") {
-      tStyle.bottom = window.innerHeight - rect.top + PAD + GAP;
-      tStyle.left   = Math.max(16, Math.min(rect.left, window.innerWidth - 312));
+      tStyle = { bottom: window.innerHeight - rect.top + PAD + GAP, left: Math.max(16, Math.min(rect.left, window.innerWidth - 312)) };
     } else {
-      tStyle.top  = rect.bottom + PAD + GAP;
-      tStyle.left = Math.max(16, Math.min(rect.left, window.innerWidth - 312));
+      tStyle = { top: rect.bottom + PAD + GAP, left: Math.max(16, Math.min(rect.left, window.innerWidth - 312)) };
     }
   }
 
@@ -107,42 +75,30 @@ function TourOverlay({ steps, refs, onClose }) {
 
   return (
     <>
-      {/* Captura clics fuera para cerrar */}
-      <div style={{ position: "fixed", inset: 0, zIndex: 1000 }} onClick={onClose} />
-
-      {/* Spotlight con sombra que oscurece el resto */}
-      {spotlightStyle && <div style={spotlightStyle} />}
-
-      {/* Tarjeta del tooltip */}
+      <div className="tour-backdrop" onClick={onClose} />
+      {spotlightStyle && <div className="tour-spotlight" style={spotlightStyle} />}
       {rect && (
-        <div className="tour-tooltip" style={tStyle}>
-          {/* Puntos de progreso */}
+        <div className="tour-tooltip" style={tStyle} role="dialog" aria-label={current.title}>
           <div className="tour-dots">
             {steps.map((_, i) => (
               <button
                 key={i}
+                aria-label={`Paso ${i + 1}`}
                 className={`tour-dot ${i === step ? "active" : i < step ? "done" : ""}`}
                 onClick={(e) => { e.stopPropagation(); setStep(i); }}
               />
             ))}
           </div>
-
           <div className="tour-tt-title">{current.title}</div>
           <div className="tour-tt-desc">{current.desc}</div>
-
           <div className="tour-tt-actions">
             <button className="tour-skip" onClick={onClose}>Saltar</button>
             <div style={{ display: "flex", gap: 8 }}>
               {step > 0 && (
-                <button className="tour-prev" onClick={(e) => { e.stopPropagation(); setStep((s) => s - 1); }}>
-                  ← Atrás
-                </button>
+                <button className="tour-prev" onClick={(e) => { e.stopPropagation(); setStep((s) => s - 1); }}>Atrás</button>
               )}
-              <button
-                className="tour-next"
-                onClick={(e) => { e.stopPropagation(); isLast ? onClose() : setStep((s) => s + 1); }}
-              >
-                {isLast ? "¡Entendido! ✓" : "Siguiente →"}
+              <button className="tour-next" onClick={(e) => { e.stopPropagation(); isLast ? onClose() : setStep((s) => s + 1); }}>
+                {isLast ? "Entendido" : "Siguiente"}
               </button>
             </div>
           </div>
@@ -154,139 +110,265 @@ function TourOverlay({ steps, refs, onClose }) {
 
 /* ── Panel de resultado ──────────────────────────────────────────────── */
 function ResultPanel({ r }) {
-  const riskClass = r.risk.toLowerCase();
-  const muniName  = r.muni.split(",")[0];
-  const sign      = r.yhat - r.hist >= 0 ? "+" : "";
+  const risk     = riesgoInfo(r.risk);
+  const muniName = r.muni.split(",")[0];
+  const diff     = r.hist != null ? r.yhat - r.hist : null;
+  const otroAnio = r.anio_dato && String(r.anio_dato) !== String(r.year);
+
   return (
     <div className="result-filled fade-in">
       <div className="result-head">
         <div>
           <h4>{r.cultivo}</h4>
-          <div className="sub">{r.muni} · {r.year}{r.semester}</div>
+          <div className="sub">{r.muni} · {r.year}, semestre {r.semester} ({SEMESTRE[r.semester]})</div>
         </div>
-        <span className={`badge-risk ${riskClass}`}>
-          <Icon.alert /> Riesgo {r.risk}
-        </span>
+        <RiskBadge nivel={r.risk} label={`Riesgo ${risk.label.toLowerCase()}`} />
       </div>
 
       <div className="result-main">
         <div>
-          <div className="result-num">{r.yhat.toFixed(1)}<small>t/ha</small></div>
+          <div className="result-num">{fmtNum(r.yhat)}<small>t/ha</small></div>
           <div className="result-lbl">Rendimiento esperado</div>
         </div>
         <div className="ci-block">
-          <div className="ci-title">Intervalo de confianza · 95%</div>
-          <ConfidenceBar
-            low={r.low} mid={r.yhat} high={r.high}
-            vmin={Math.max(0, r.low - 0.5)} vmax={r.high + 0.5}
-          />
+          <div className="ci-title">Rango probable (95 %)</div>
+          <ConfidenceBar low={r.low} mid={r.yhat} high={r.high} vmin={Math.max(0, r.low - 0.5)} vmax={r.high + 0.5} />
         </div>
       </div>
 
+      <p className="result-summary">
+        Se espera cosechar unas <strong>{fmtNum(r.yhat)} toneladas por hectárea</strong> sembrada; lo más probable es que
+        el resultado quede entre {fmtNum(r.low)} y {fmtNum(r.high)}.
+        {diff != null && (
+          <> Eso es <strong className={diff >= 0 ? "pos" : "neg"}>{signed(diff, 2)} t/ha</strong> frente al promedio
+          histórico de {muniName} ({fmtNum(r.hist, 2)}).</>
+        )}
+      </p>
+
       <div className="metrics-3">
-        <div className="metric-mini"><div className="v">{r.risk}</div><div className="l">Nivel de riesgo</div></div>
-        <div className="metric-mini"><div className="v">{r.confidence}%</div><div className="l">Confianza</div></div>
-        <div className="metric-mini"><div className="v">{r.hist != null ? r.hist.toFixed(2) : "—"}</div><div className="l">Promedio hist.</div></div>
+        <div className={`metric-mini risk-${risk.cls}`}><div className="v">{risk.label}</div><div className="l">{risk.texto}</div></div>
+        <div className="metric-mini"><div className="v">{r.confidence}%</div><div className="l">Confianza del modelo</div></div>
+        <div className="metric-mini"><div className="v">{r.hist != null ? fmtNum(r.hist, 2) : "—"}</div><div className="l">Promedio histórico (t/ha)</div></div>
       </div>
 
-      <div className="context-note">
-        <span className="lead">Contexto</span>
-        El cultivo de <strong>{r.cultivo.toLowerCase()}</strong> en {muniName}
-        {r.hist != null
-          ? <> muestra una desviación de <strong>{sign}{(r.yhat - r.hist).toFixed(2)} t/ha</strong> frente al rendimiento histórico registrado.</>
-          : <> tiene un rendimiento esperado de <strong>{r.yhat.toFixed(2)} t/ha</strong> para el período seleccionado.</>
-        }
-        {" "}El modelo pondera anomalías de precipitación, índice ENSO y series históricas por municipio-cultivo.
-        {r.fromDB && <span style={{ display: "block", marginTop: 6, fontSize: 11, color: "var(--blue-700)", fontFamily: "var(--font-mono)" }}>✓ Predicción desde XGBoost · base de datos real</span>}
-      </div>
+      {(otroAnio || !r.fromDB) && (
+        <div className="result-notes">
+          {otroAnio && (
+            <span><Icon.info size={13} /> Aún no hay predicción para {r.year}; se muestra la más reciente disponible ({r.anio_dato}).</span>
+          )}
+          <DemoNotice show={!r.fromDB} />
+        </div>
+      )}
 
       <ShapPanel shap={r.shap} />
     </div>
   );
 }
 
-/* ── Panel de explicabilidad SHAP ────────────────────────────────────── */
+/* ── Por qué este resultado (SHAP) ───────────────────────────────────── */
 function ShapPanel({ shap }) {
   if (!Array.isArray(shap) || shap.length === 0) return null;
   const maxAbs = Math.max(...shap.map((s) => Math.abs(s.shap || 0)), 0.001);
-  const labelize = (k) => k
-    .replace(/_/g, " ")
-    .replace(/\b(\w)/g, (m) => m.toUpperCase());
 
   return (
-    <div className="shap-panel" style={{ marginTop: 16, padding: "14px 16px", background: "var(--gray-50, #f7f8fa)", borderRadius: 10, border: "1px solid var(--gray-200, #e5e7eb)" }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--blue-700)", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 10 }}>
-        🔍 Por qué esta predicción · SHAP
-      </div>
+    <div className="shap-panel">
+      <div className="shap-title">Por qué este resultado</div>
+      <p className="shap-sub">Los factores que más movieron la predicción para este caso:</p>
       {shap.map((s, i) => {
-        const v   = Number(s.shap || 0);
+        const v = Number(s.shap || 0);
         const pct = (Math.abs(v) / maxAbs) * 100;
-        const positive = v >= 0;
+        const up = v >= 0;
         return (
-          <div key={i} style={{ marginBottom: 10 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-              <span style={{ fontWeight: 500 }}>{labelize(s.feature)}</span>
-              <span style={{ fontFamily: "var(--font-mono)", color: positive ? "#1a7a4a" : "#dc2626" }}>
-                {positive ? "+" : ""}{v.toFixed(3)}
-              </span>
+          <div key={i} className="shap-row">
+            <div className="shap-meta">
+              <span>{labelFeature(s.feature)}</span>
+              <span className={up ? "pos" : "neg"}>{up ? "Sube" : "Baja"} {fmtNum(Math.abs(v), 2)} t/ha</span>
             </div>
-            <div style={{ height: 6, background: "#e5e7eb", borderRadius: 4, position: "relative", overflow: "hidden" }}>
-              <div style={{
-                position: "absolute",
-                left: positive ? "50%" : `${50 - pct / 2}%`,
-                width: `${pct / 2}%`,
-                height: "100%",
-                background: positive ? "#1a7a4a" : "#dc2626",
-                borderRadius: 4,
-              }} />
-              <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "#94a3b8" }} />
+            <div className="diverge-track">
+              <span className={up ? "pos" : "neg"} style={up ? { left: "50%", width: `${pct / 2}%` } : { left: `${50 - pct / 2}%`, width: `${pct / 2}%` }} />
+              <i />
             </div>
           </div>
         );
       })}
-      <div style={{ fontSize: 11, color: "var(--gray-600, #6b7280)", marginTop: 6 }}>
-        Verde = empuja la predicción al alza · Rojo = la baja. Top 3 factores por impacto absoluto.
-      </div>
     </div>
   );
 }
 
-/* ── Tabla comparativa (vecinos reales del mismo departamento) ───────── */
-function CompareTable({ r }) {
-  const neighbors = Array.isArray(r.vecinos) ? r.vecinos : [];
-  if (neighbors.length === 0) return null;
+/* ── Qué hacer (recomendación) ───────────────────────────────────────── */
+const REC_ICONS = [Icon.calendar, Icon.sprout, null, Icon.drop];
+
+function Recomendacion({ muni, cultivo, enso, lluvia }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch("/api/recomendacion", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ muni, cultivo, enso, lluvia }),
+    })
+      .then((r) => r.json()).then(setData).catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [muni, cultivo, enso, lluvia]);
+
+  if (loading) return <div className="panel-empty">Preparando recomendaciones…</div>;
+  if (!data?.recomendaciones) return <div className="panel-empty">No fue posible generar recomendaciones para esta consulta.</div>;
+
   return (
-    <div className="compare-table-wrap fade-in">
-      <div className="head">
-        <div>
-          <h3>Comparativo regional</h3>
-          <p>Municipios del mismo departamento con predicciones para {r.cultivo.toLowerCase()}.</p>
-        </div>
-        <span className="src-badge">pred_rendimiento · vecinos</span>
+    <>
+      <div className="rec-grid">
+        {data.recomendaciones.map((r, i) => {
+          const alerta = r.icono === "⚠️";
+          const I = REC_ICONS[i] || (alerta ? Icon.alert : Icon.checkCircle);
+          return (
+            <div key={i} className={`rec-card ${alerta ? "warn" : ""}`}>
+              <span className="icon-chip"><I size={18} /></span>
+              <h4>{r.titulo}</h4>
+              <p>{r.detalle}</p>
+              <p className="rec-tip">{r.ajuste}</p>
+            </div>
+          );
+        })}
       </div>
-      <table className="compare-table">
-        <thead>
-          <tr><th>Municipio</th><th>Rendimiento</th><th>Riesgo</th><th>vs. tu municipio</th></tr>
-        </thead>
-        <tbody>
-          {neighbors.map((n) => {
-            const delta = r.yhat > 0 ? ((n.yld - r.yhat) / r.yhat) * 100 : 0;
-            return (
-              <tr key={n.name}>
-                <td><strong>{n.name}</strong></td>
-                <td className="num">{n.yld.toFixed(1)} <span className="muted" style={{ fontSize: 11 }}>t/ha</span></td>
-                <td><span className={`badge-risk ${n.risk.toLowerCase()}`}>{n.risk}</span></td>
-                <td className={delta >= 0 ? "pos num" : "neg num"}>{delta >= 0 ? "+" : ""}{delta.toFixed(1)}%</td>
+      <p className="panel-foot">
+        Recomendaciones orientativas según el calendario típico del cultivo, la aptitud del suelo (UPRA) y el escenario El Niño / La Niña.
+        {data.aptitud_sipra && <> Aptitud del suelo en la zona: <strong>{data.aptitud_sipra}</strong>.</>}
+        {" "}Consulta siempre con un asistente técnico local.
+      </p>
+    </>
+  );
+}
+
+/* ── Comparar con la región ──────────────────────────────────────────── */
+function Comparativo({ muni, cultivo }) {
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    setData(null);
+    fetch(`/api/comparativo?muni=${encodeURIComponent(muni)}&cultivo=${encodeURIComponent(cultivo)}`)
+      .then((r) => r.json()).then(setData).catch(() => setData({ filas: [] }));
+  }, [muni, cultivo]);
+
+  if (!data) return <div className="panel-empty">Buscando municipios para comparar…</div>;
+  if (data.fromDB === false) {
+    return <div className="panel-empty">La comparación regional no está disponible en este momento porque la base de datos no responde.</div>;
+  }
+  if (!data.filas || data.filas.length < 2) {
+    return (
+      <div className="panel-empty">
+        No hay suficientes predicciones de {cultivo.toLowerCase()} en otros municipios
+        {data.departamento ? ` de ${data.departamento}` : ""} para hacer una comparación.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {data.posicion && (
+        <p className="panel-lead">
+          En {data.departamento}, <strong>{muni.split(",")[0]}</strong> ocupa el puesto <strong>{data.posicion} de {data.total}</strong> municipios
+          por rendimiento esperado de {cultivo.toLowerCase()}.
+        </p>
+      )}
+      <div className="table-scroll">
+        <table className="data-table">
+          <thead>
+            <tr><th>Municipio</th><th>Rendimiento esperado</th><th>Riesgo climático</th><th>Frente a su historia</th></tr>
+          </thead>
+          <tbody>
+            {data.filas.map((f) => (
+              <tr key={f.municipio} className={f.actual ? "current" : ""}>
+                <td><strong>{f.municipio}</strong>{f.actual && <span className="tag-current">Tu consulta</span>}</td>
+                <td className="num">{fmtNum(f.rendimiento)} <span className="muted">t/ha</span></td>
+                <td>{f.riesgo ? <RiskBadge nivel={f.riesgo} label={riesgoInfo(f.riesgo).label} /> : <span className="muted">Sin alertas</span>}</td>
+                <td className={`num ${f.vs_hist_pct == null ? "" : f.vs_hist_pct >= 0 ? "pos" : "neg"}`}>
+                  {f.vs_hist_pct == null ? "—" : `${signed(f.vs_hist_pct)} %`}
+                </td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+/* ── Clima en vivo (Open-Meteo) ──────────────────────────────────────── */
+function ClimaActual({ muni }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    if (!muni) return;
+    setData(null);
+    const nombre = muni.split(",")[0].trim();
+    fetch(`/api/clima/actual?municipio=${encodeURIComponent(nombre)}`)
+      .then((r) => r.json()).then(setData).catch(() => setData(null));
+  }, [muni]);
+
+  if (!data || data.error || !data.actual) return null;
+  const a = data.actual;
+  const Sky = a.es_de_dia ? Icon.sun : Icon.moon;
+  return (
+    <div className="weather-now">
+      <Sky size={20} />
+      <div className="weather-place">
+        <strong>Clima ahora en {data.municipio}</strong>
+        <span>Open-Meteo · en vivo</span>
+      </div>
+      <div className="weather-vals">
+        <span><Icon.thermo size={13} /> {a.temperatura_c}°C</span>
+        <span><Icon.drop size={13} /> {a.humedad_pct}%</span>
+        <span><Icon.cloudRain size={13} /> {a.precipitacion_mm} mm</span>
+        <span><Icon.wind size={13} /> {a.viento_kmh} km/h</span>
+      </div>
     </div>
   );
 }
 
-/* ── Página principal ────────────────────────────────────────────────── */
+/* ── Pestañas posteriores al resultado ───────────────────────────────── */
+const FOLLOW_TABS = [
+  { id: "hacer",    label: "Qué hacer",               icon: Icon.checkCircle },
+  { id: "comparar", label: "Comparar con la región",  icon: Icon.barChart },
+  { id: "simular",  label: "¿Y si cambia el clima?",  icon: Icon.sliders },
+];
+
+function FollowUp({ r }) {
+  const [tab, setTab] = useState("hacer");
+  return (
+    <div className="card followup fade-in">
+      <div className="followup-head">
+        <h3>Siguientes pasos</h3>
+        <div className="tabs" role="tablist">
+          {FOLLOW_TABS.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              className={`tab ${tab === t.id ? "active" : ""}`}
+              onClick={() => setTab(t.id)}
+            >
+              <t.icon size={15} /> {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="card-body">
+        <div hidden={tab !== "hacer"}>
+          <Recomendacion muni={r.muni} cultivo={r.cultivo} enso={r.escenario_enso} lluvia={r.escenario_lluvia} />
+        </div>
+        <div hidden={tab !== "comparar"}>
+          <Comparativo muni={r.muni} cultivo={r.cultivo} />
+        </div>
+        <div hidden={tab !== "simular"}>
+          <GemeloDigital muni={r.muni} cultivo={r.cultivo} baseline={r.yhat} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Página ──────────────────────────────────────────────────────────── */
 export default function PagePrediccion() {
   const [municipios, setMunicipios] = useState([]);
   const [cultivos,   setCultivos]   = useState([]);
@@ -300,69 +382,37 @@ export default function PagePrediccion() {
   const [loading,    setLoading]    = useState(false);
   const [tourActive, setTourActive] = useState(false);
 
-  /* Refs para el tour */
-  const muniRef       = useRef(null);
-  const cultivoRef    = useRef(null);
-  const periodoRef    = useRef(null);
-  const escenariosRef = useRef(null);
-  const submitRef     = useRef(null);
-  const resultRef     = useRef(null);
-
   const tourRefs = {
-    muni:       muniRef,
-    cultivo:    cultivoRef,
-    periodo:    periodoRef,
-    escenarios: escenariosRef,
-    submit:     submitRef,
-    result:     resultRef,
+    muni: useRef(null), cultivo: useRef(null), periodo: useRef(null),
+    escenarios: useRef(null), submit: useRef(null), result: useRef(null),
   };
 
   useEffect(() => {
-    fetch("/api/municipios")
-      .then((r) => r.json())
-      .then((data) => {
-        const list = Array.isArray(data) ? data : [];
-        setMunicipios(list);
-        if (list.length) setMuni(list[0]);
-      })
-      .catch(() => {
-        const fallback = ["Ibagué, Tolima","Espinal, Tolima","Villavicencio, Meta","Pasto, Nariño","Santa Marta, Magdalena","Manizales, Caldas","Montería, Córdoba"];
-        setMunicipios(fallback);
-        setMuni(fallback[0]);
-      });
-
-    fetch("/api/cultivos")
-      .then((r) => r.json())
-      .then((data) => {
-        const list = Array.isArray(data) ? data : [];
-        setCultivos(list);
-        if (list.length) setCultivo(list[0]);
-      })
-      .catch(() => {
-        const fallback = ["Maíz tecnificado","Arroz riego","Café arábica","Caña panelera","Plátano","Papa Diacol","Aguacate Hass"];
-        setCultivos(fallback);
-        setCultivo(fallback[0]);
-      });
+    const load = (url, fallback, setList, setSel) =>
+      fetch(url).then((r) => r.json())
+        .then((d) => { const l = Array.isArray(d) && d.length ? d : fallback; setList(l); setSel(l[0]); })
+        .catch(() => { setList(fallback); setSel(fallback[0]); });
+    load("/api/municipios", ["Ibagué, Tolima", "Espinal, Tolima", "Villavicencio, Meta", "Pasto, Nariño", "Manizales, Caldas", "Montería, Córdoba"], setMunicipios, setMuni);
+    load("/api/cultivos", ["Maíz tecnificado", "Arroz riego", "Café arábica", "Caña panelera", "Plátano", "Papa Diacol"], setCultivos, setCultivo);
   }, []);
 
   const onSubmit = async (e) => {
     e.preventDefault();
     setLoading(true); setResult(null);
     try {
-      const res = await fetch("/api/prediccion", {
-        method:  "POST",
+      const res  = await fetch("/api/prediccion", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ muni, cultivo, year, semester, enso, lluvia }),
+        body: JSON.stringify({ muni, cultivo, year, semester, enso, lluvia }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setResult({ ...data, escenario_enso: enso, escenario_lluvia: lluvia });
+      if (window.innerWidth < 900) {
+        setTimeout(() => tourRefs.result.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+      }
     } catch {
-      const base      = 4.4 + (cultivo.includes("Arroz") ? 0.6 : 0) + (cultivo.includes("Café") ? -0.8 : 0) + (semester === "B" ? 0.15 : 0);
-      const ensoAdj   = enso   === "El Niño" ? -0.5 : enso   === "La Niña" ? 0.3 : 0;
-      const lluviaAdj = lluvia === "Déficit"  ? -0.4 : lluvia === "Exceso"  ? -0.2 : 0;
-      const yhat      = +(base + ensoAdj + lluviaAdj).toFixed(1);
-      const risk      = yhat < 4.0 ? "ALTO" : yhat < 4.6 ? "MEDIO" : "BAJO";
-      setResult({ muni, cultivo, year, semester, yhat, low: +(yhat - 1.2).toFixed(1), high: +(yhat + 1.2).toFixed(1), risk, confidence: risk === "BAJO" ? 86 : risk === "MEDIO" ? 78 : 64, hist: 4.4 });
+      setResult({ error: true });
     } finally {
       setLoading(false);
     }
@@ -370,217 +420,117 @@ export default function PagePrediccion() {
 
   return (
     <>
-      {/* Tour overlay (portal natural: renderiza encima de todo) */}
-      {tourActive && (
-        <TourOverlay
-          steps={TOUR_STEPS}
-          refs={tourRefs}
-          onClose={() => setTourActive(false)}
-        />
-      )}
+      {tourActive && <TourOverlay steps={TOUR_STEPS} refs={tourRefs} onClose={() => setTourActive(false)} />}
 
-      <section className="section">
+      <section className="section page-top">
         <div className="container">
-          <div className="section-head">
-            <span className="eyebrow">Sistema de predicción</span>
-            <h2>Consulta puntual por municipio y cultivo</h2>
-            <p>Selecciona una zona, un cultivo y un período. El modelo XGBoost devuelve el rendimiento esperado, nivel de riesgo y contexto explicativo en lenguaje claro.</p>
-          </div>
+          <SectionHead eyebrow="Predicción" title="¿Cuánto rendirá tu cultivo?">
+            Elige un municipio, un cultivo y un período. Te mostramos cuánto se espera cosechar, qué tan
+            riesgosa es la temporada y qué puedes hacer al respecto.
+          </SectionHead>
 
           <div className="predict-grid">
-            {/* ── Formulario ── */}
             <form className="form-card" onSubmit={onSubmit}>
-              <h3><span className="ic-wrap"><Icon.settings /></span> Parámetros de Consulta</h3>
+              <h3><span className="icon-chip sm"><Icon.filter size={15} /></span> Tu consulta</h3>
 
-              <div className="form-row" ref={muniRef}>
+              <div className="form-row" ref={tourRefs.muni}>
                 <div className="field">
-                  <label>Municipio</label>
-                  <select value={muni} onChange={(e) => setMuni(e.target.value)}>
+                  <label htmlFor="f-muni">Municipio</label>
+                  <select id="f-muni" value={muni} onChange={(e) => setMuni(e.target.value)}>
                     {municipios.map((m) => <option key={m}>{m}</option>)}
                   </select>
-                  <ClimaActualWidget muni={muni} />
+                  <ClimaActual muni={muni} />
                 </div>
               </div>
 
-              <div className="form-row" ref={cultivoRef}>
+              <div className="form-row" ref={tourRefs.cultivo}>
                 <div className="field">
-                  <label>Cultivo</label>
-                  <select value={cultivo} onChange={(e) => setCultivo(e.target.value)}>
+                  <label htmlFor="f-cultivo">Cultivo</label>
+                  <select id="f-cultivo" value={cultivo} onChange={(e) => setCultivo(e.target.value)}>
                     {cultivos.map((c) => <option key={c}>{c}</option>)}
                   </select>
                 </div>
               </div>
 
-              <div className="form-row cols2" ref={periodoRef}>
+              <div className="form-row cols2" ref={tourRefs.periodo}>
                 <div className="field">
-                  <label>Año</label>
-                  <select value={year} onChange={(e) => setYear(e.target.value)}>
+                  <label htmlFor="f-year">Año</label>
+                  <select id="f-year" value={year} onChange={(e) => setYear(e.target.value)}>
                     <option>2026</option><option>2027</option><option>2028</option>
                   </select>
                 </div>
                 <div className="field">
-                  <label>Semestre</label>
-                  <select value={semester} onChange={(e) => setSemester(e.target.value)}>
-                    <option value="A">A (Ene–Jun)</option>
-                    <option value="B">B (Jul–Dic)</option>
+                  <label htmlFor="f-sem">Semestre</label>
+                  <select id="f-sem" value={semester} onChange={(e) => setSemester(e.target.value)}>
+                    <option value="A">A · enero – junio</option>
+                    <option value="B">B · julio – diciembre</option>
                   </select>
                 </div>
               </div>
 
-              <div className="adv" ref={escenariosRef}>
-                <div className="adv-title">Escenarios avanzados</div>
+              <div className="adv" ref={tourRefs.escenarios}>
+                <div className="adv-title">Escenario climático <span>opcional</span></div>
                 <div className="form-row cols2" style={{ marginBottom: 0 }}>
                   <div className="field">
-                    <label>ENSO</label>
-                    <select value={enso} onChange={(e) => setEnso(e.target.value)}>
-                      <option>Neutral</option><option>El Niño</option><option>La Niña</option>
+                    <label htmlFor="f-enso">El Niño / La Niña</label>
+                    <select id="f-enso" value={enso} onChange={(e) => setEnso(e.target.value)}>
+                      <option value="Neutral">Año normal</option>
+                      <option value="El Niño">El Niño (más seco)</option>
+                      <option value="La Niña">La Niña (más lluvioso)</option>
                     </select>
                   </div>
                   <div className="field">
-                    <label>Régimen lluvia</label>
-                    <select value={lluvia} onChange={(e) => setLluvia(e.target.value)}>
-                      <option>Normal</option><option>Déficit</option><option>Exceso</option>
+                    <label htmlFor="f-lluvia">Lluvia esperada</label>
+                    <select id="f-lluvia" value={lluvia} onChange={(e) => setLluvia(e.target.value)}>
+                      <option value="Normal">Normal</option>
+                      <option value="Déficit">Menos de lo normal</option>
+                      <option value="Exceso">Más de lo normal</option>
                     </select>
                   </div>
                 </div>
               </div>
 
-              <button ref={submitRef} type="submit" className="btn-block" disabled={loading || !muni || !cultivo}>
-                {loading
-                  ? "Calculando…"
-                  : <><span>Consultar Predicción</span> <Icon.arrow className="arrow" /></>
-                }
+              <button ref={tourRefs.submit} type="submit" className="btn-block" disabled={loading || !muni || !cultivo}>
+                {loading ? "Consultando…" : <>Ver predicción <Icon.arrow className="arrow" /></>}
               </button>
             </form>
 
-            {/* ── Panel de resultado ── */}
-            <div className="result-card" ref={resultRef}>
+            <div className="result-card" ref={tourRefs.result} aria-live="polite">
               {!result && !loading && (
                 <div className="result-empty">
-                  <div className="lupa"><Icon.search /></div>
-                  <div className="head">¿Cómo funciona el predictor?</div>
-                  <div className="sub">
-                    Elige un municipio, un cultivo y un período en el formulario de la izquierda.
-                    El modelo XGBoost calculará cuánto puedes cosechar y qué tan riesgosa es la temporada.
-                  </div>
-                  <button className="btn-tour-start" onClick={() => setTourActive(true)}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polygon points="5 3 19 12 5 21 5 3"/>
-                    </svg>
-                    Iniciar tour paso a paso
+                  <div className="lupa"><Icon.search size={30} strokeWidth={1.6} /></div>
+                  <div className="head">Tu resultado aparecerá aquí</div>
+                  <ul className="empty-list">
+                    <li><Icon.check size={14} /> Toneladas por hectárea que se esperan cosechar</li>
+                    <li><Icon.check size={14} /> Rango probable y nivel de riesgo climático</li>
+                    <li><Icon.check size={14} /> Los factores que más influyen y qué hacer</li>
+                  </ul>
+                  <button type="button" className="btn-tour-start" onClick={() => setTourActive(true)}>
+                    <Icon.play /> Ver guía paso a paso
                   </button>
                 </div>
               )}
               {loading && (
                 <div className="result-empty">
-                  <div className="lupa"><Icon.cpu /></div>
-                  <div className="head">Ejecutando modelo…</div>
-                  <div className="sub">XGBoost · 1.500 árboles · profundidad 8 · inferencia distribuida.</div>
+                  <div className="lupa spin"><Icon.refresh size={28} /></div>
+                  <div className="head">Consultando el modelo…</div>
+                  <div className="sub">Buscamos la predicción para este municipio y cultivo.</div>
                 </div>
               )}
-              {result && !loading && <ResultPanel r={result} />}
+              {result?.error && !loading && (
+                <div className="result-empty">
+                  <div className="lupa"><Icon.alert size={28} /></div>
+                  <div className="head">No pudimos obtener la predicción</div>
+                  <div className="sub">Revisa tu conexión e inténtalo de nuevo en unos segundos.</div>
+                </div>
+              )}
+              {result && !result.error && !loading && <ResultPanel r={result} />}
             </div>
           </div>
 
-          {result && !loading && <CompareTable r={result} />}
-          {result && !loading && (
-            <RecomendacionPanel
-              muni={result.muni}
-              cultivo={result.cultivo}
-              enso={result.escenario_enso || "Neutral"}
-              lluvia={result.escenario_lluvia || "Normal"}
-            />
-          )}
-          {result && !loading && <GemeloDigital muni={result.muni} cultivo={result.cultivo} />}
+          {result && !result.error && !loading && <FollowUp r={result} />}
         </div>
       </section>
     </>
-  );
-}
-
-/* ── Widget clima en vivo (Open-Meteo) ───────────────────────────────── */
-function ClimaActualWidget({ muni }) {
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    if (!muni) return;
-    const nombre = muni.split(",")[0].trim();
-    fetch(`/api/clima/actual?municipio=${encodeURIComponent(nombre)}`)
-      .then((r) => r.json())
-      .then((d) => setData(d))
-      .catch(() => setData(null));
-  }, [muni]);
-
-  if (!data || data.error || !data.actual) return null;
-  const a = data.actual;
-  return (
-    <div style={{
-      marginTop: 12, padding: "10px 12px",
-      background: "linear-gradient(90deg, #1e4d7b 0%, #1a7a4a 100%)",
-      borderRadius: 10, color: "white",
-      display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap",
-    }}>
-      <span style={{ fontSize: 22 }}>{a.es_de_dia ? "☀️" : "🌙"}</span>
-      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>{data.municipio}</span>
-        <span style={{ fontSize: 11, opacity: 0.85 }}>Open-Meteo · en vivo</span>
-      </div>
-      <div style={{ display: "flex", gap: 14, fontSize: 12, marginLeft: "auto", flexWrap: "wrap" }}>
-        <span>🌡 <strong>{a.temperatura_c}°C</strong></span>
-        <span>💧 {a.humedad_pct}%</span>
-        <span>☔ {a.precipitacion_mm} mm</span>
-        <span>💨 {a.viento_kmh} km/h</span>
-      </div>
-    </div>
-  );
-}
-
-/* ── Panel de recomendación accionable ───────────────────────────────── */
-function RecomendacionPanel({ muni, cultivo, enso, lluvia }) {
-  const [data,    setData]    = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    setLoading(true);
-    fetch("/api/recomendacion", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ muni, cultivo, enso, lluvia }),
-    })
-      .then((r) => r.json())
-      .then((d) => setData(d))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, [muni, cultivo, enso, lluvia]);
-
-  if (loading) return <div className="card" style={{ marginTop: 22 }}><div className="card-body">Calculando recomendación accionable…</div></div>;
-  if (!data || !data.recomendaciones) return null;
-
-  return (
-    <div className="card" style={{ marginTop: 22 }}>
-      <div className="card-head">
-        <div>
-          <h3>Recomendación accionable</h3>
-          <p>Calendario de siembra, dosis de fertilizante y manejo del riesgo según ENSO + aptitud SIPRA.</p>
-        </div>
-        <span className="src-badge">fact_aptitud_suelo + fact_alerta_enso</span>
-      </div>
-      <div className="card-body">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
-          {data.recomendaciones.map((r, i) => (
-            <div key={i} style={{ padding: "14px 16px", border: "1px solid var(--gray-200)", borderRadius: 10, background: "white" }}>
-              <div style={{ fontSize: 20, marginBottom: 6 }}>{r.icono}</div>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{r.titulo}</div>
-              <div style={{ fontSize: 12, color: "var(--gray-700)", marginBottom: 6 }}>{r.detalle}</div>
-              <div style={{ fontSize: 11, color: "var(--blue-700)", fontStyle: "italic" }}>{r.ajuste}</div>
-            </div>
-          ))}
-        </div>
-        {data.rendimiento_proyectado != null && (
-          <div style={{ marginTop: 14, fontSize: 12, color: "var(--gray-600)" }}>
-            Proyección con escenario actual: <strong>{data.rendimiento_proyectado} t/ha</strong> · base {data.rendimiento_base ?? "—"} t/ha · aptitud SIPRA: <code>{data.aptitud_sipra || "n/d"}</code>
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
