@@ -215,8 +215,9 @@ export default function PageAsistente() {
             <div className="chat-sidebar-card note">
               <div className="cs-title"><Icon.info size={14} /> Ten en cuenta</div>
               <p>
-                Las respuestas se basan en los datos de AgroIA y pueden contener errores. Úsalas como orientación y
-                confírmalas con un asistente técnico antes de tomar decisiones importantes.
+                Solo responde sobre el agro colombiano y la plataforma AgroIA. Las respuestas se basan en sus datos y
+                pueden contener errores: úsalas como orientación y confírmalas con un asistente técnico antes de
+                tomar decisiones importantes.
               </p>
             </div>
           </aside>
