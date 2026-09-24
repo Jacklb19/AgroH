@@ -65,7 +65,9 @@ Reglas de lenguaje:
 - NUNCA afirmes que "no hay riesgo" o que "las condiciones son favorables" si no consultaste datos que lo respalden.
 - Los rendimientos solo son comparables dentro de un mismo cultivo (el tomate rinde mucho más que el café por naturaleza).
 - Usa SOLO cifras, rangos, años y clasificaciones que aparezcan en los resultados de las herramientas. Si un dato no está (por ejemplo, la aptitud del suelo), no lo menciones o di que no está disponible.
-- Menciona siempre el año al que corresponde cada dato.
+- Menciona siempre el año al que corresponde cada dato, tal como viene en el resultado de la herramienta. No inventes años.
+- Responde SIEMPRE en español.
+- Si el usuario pregunta "¿por qué?" después de que no pudiste ayudarle con un tema, explícale en una o dos frases, con amabilidad, que eres un asistente especializado en el agro colombiano y la plataforma AgroIA, y sugiere una pregunta de ejemplo.
 
 Estructura cada respuesta así:
 1. Línea de título con emoji y dato principal (ej: "🥔 Papa en Pasto — cosecha estable")
@@ -151,7 +153,7 @@ const TOOLS = [
       properties: {
         municipio: { type: "string", description: "Municipio objetivo" },
         cultivo:   { type: "string", description: "Cultivo objetivo" },
-        anio:      { type: "string", description: "Año de cosecha (por defecto el año en curso)" },
+        anio:      { type: "string", description: "Año de cosecha. Pásalo SOLO si el usuario lo menciona; si no, omítelo (se usa el año en curso)." },
       },
       required: ["municipio", "cultivo"],
     },
@@ -381,7 +383,15 @@ async function ejecutarHerramienta(name, args, intento = 0) {
       }
 
       case "proyectar_escenario": {
-        const anio = parseInt(args.anio, 10) || ANIO_ACTUAL();
+        /* El modelo a veces inventa el año (p. ej. 2024). Se usa el pedido solo si es
+           el actual o futuro y tiene escenarios; si no, el año más cercano que los tenga. */
+        const pedido = Math.max(parseInt(args.anio, 10) || ANIO_ACTUAL(), ANIO_ACTUAL());
+        const { rows: anios } = await pool.query(`
+          SELECT anio FROM pred_pronostico
+          WHERE id_version = ${VERSION_ACTIVA} AND tipo = 'pronostico' AND escenario = 'El Niño'
+          GROUP BY anio ORDER BY ABS(anio - $1), anio LIMIT 1
+        `, [pedido]);
+        const anio = anios[0]?.anio ?? pedido;
         const { rows } = await pool.query(`
           SELECT m.nombre_municipio, c.nombre_cultivo, p.escenario,
                  ROUND(p.rendimiento_predicho::numeric, 2) AS rendimiento_esperado_t_ha,
@@ -396,7 +406,7 @@ async function ejecutarHerramienta(name, args, intento = 0) {
           ORDER BY m.nombre_municipio, p.escenario
         `, [patron(args.municipio), await resolverCultivo(args.cultivo), anio]);
         if (!rows.length) return { sin_datos: true, mensaje: "No hay pronóstico para esa combinación municipio-cultivo." };
-        return { anio, escenarios: rows };
+        return { anio, escenarios: rows, nota: `Pronóstico para la cosecha de ${anio}. Menciona este año en la respuesta.` };
       }
 
       case "recomendar_cultivo": {
