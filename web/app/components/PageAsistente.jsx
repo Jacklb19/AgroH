@@ -200,7 +200,7 @@ export default function PageAsistente() {
     <section className="section page-top">
       <div className="container">
         <SectionHead eyebrow="Asistente con IA" tone="blue" title="Pregunta como le preguntarías a un asesor">
-          Escribe o dicta tu pregunta sobre rendimientos, alertas, clima o qué sembrar. El asistente consulta los
+          Escribe o dicta tu pregunta sobre rendimientos, riesgo climático, clima o qué sembrar. El asistente consulta los
           datos de la plataforma y responde en lenguaje sencillo.
         </SectionHead>
 
