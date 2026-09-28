@@ -1,5 +1,8 @@
 import pool from "@/lib/db";
 
+/* Siempre en vivo: un healthcheck prerenderizado respondería con el estado del build. */
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const { rows } = await pool.query("SELECT NOW() AS hora, current_database() AS bd");

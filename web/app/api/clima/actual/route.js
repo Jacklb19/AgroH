@@ -1,4 +1,5 @@
 import pool from "@/lib/db";
+import { titulo } from "@/lib/modelo";
 
 const OPENMETEO_URL = "https://api.open-meteo.com/v1/forecast";
 
@@ -6,38 +7,40 @@ const OPENMETEO_URL = "https://api.open-meteo.com/v1/forecast";
 const CACHE = new Map();
 const TTL_MS = 15 * 60 * 1000;
 
-async function coordsMunicipio(nombre) {
+async function coordsMunicipio({ id, nombre }) {
+  /* Preferimos el código DIVIPOLA: el nombre con tildes no siempre coincide con ILIKE. */
   const { rows } = await pool.query(
     `SELECT latitud_centroide  AS lat,
             longitud_centroide AS lon,
             nombre_municipio,
             nombre_departamento
      FROM dim_municipio
-     WHERE nombre_municipio ILIKE $1
-       AND latitud_centroide IS NOT NULL
+     WHERE latitud_centroide IS NOT NULL
+       AND (($1::text IS NOT NULL AND id_municipio = $1) OR ($1::text IS NULL AND nombre_municipio ILIKE $2))
      LIMIT 1`,
-    [`%${nombre}%`],
+    [id || null, `%${nombre}%`],
   );
   if (rows.length === 0) return null;
   return {
     lat:  parseFloat(rows[0].lat),
     lon:  parseFloat(rows[0].lon),
-    municipio:    rows[0].nombre_municipio,
-    departamento: rows[0].nombre_departamento,
+    municipio:    titulo(rows[0].nombre_municipio),
+    departamento: titulo(rows[0].nombre_departamento),
   };
 }
 
 export async function GET(request) {
   const url       = new URL(request.url);
+  const id        = url.searchParams.get("id");
   const muni      = url.searchParams.get("municipio") || "Bogotá";
-  const cacheKey  = muni.toLowerCase().trim();
+  const cacheKey  = (id || muni).toLowerCase().trim();
   const cached    = CACHE.get(cacheKey);
   if (cached && (Date.now() - cached.ts) < TTL_MS) {
     return Response.json({ ...cached.data, cached: true });
   }
 
   try {
-    const coords = await coordsMunicipio(muni);
+    const coords = await coordsMunicipio({ id, nombre: muni });
     if (!coords) {
       return Response.json({ error: "Municipio no encontrado en dim_municipio" }, { status: 404 });
     }

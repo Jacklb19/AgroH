@@ -192,3 +192,4 @@ web/out/
 .env
 .env.example
 AgroIA_Informe_Diseno_Web.docx
+.vercel

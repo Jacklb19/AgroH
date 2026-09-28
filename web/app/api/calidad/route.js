@@ -1,6 +1,9 @@
 import fs from "fs/promises";
 import path from "path";
 
+/* Revalida cada 5 min: evita que la respuesta quede congelada en el build. */
+export const revalidate = 300;
+
 /* Lee los reportes JSON emitidos por utils/extraction_quality.standardize
    y los retorna agregados. Permite al frontend mostrar la calidad real
    de cada fuente sin tener que correr Python. */

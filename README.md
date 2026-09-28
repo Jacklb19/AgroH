@@ -128,24 +128,30 @@ Se realizaron **4 pruebas ANOVA de una vía** con sus respectivos tests post-hoc
 
 ## 📈 Resultados Clave
 
-### Métricas del Modelo de Rendimiento
+### Métricas del Modelo de Pronóstico (versión 4, `models/train_pronostico.py`)
 
-| Métrica | Descripción | Resultado |
-|---------|-------------|-----------|
-| **R²** | Coeficiente de determinación | > 0.80 |
-| **MAE** | Error Absoluto Medio (t/ha) | < 0.50 t/ha |
-| **RMSE** | Raíz del Error Cuadrático Medio | < 0.80 t/ha |
+Medidas con **backtest de origen móvil**: para 2022, 2023 y 2024 el modelo se entrena solo con los años anteriores y se compara con lo que realmente ocurrió (42.985 casos municipio × cultivo × año).
 
-### Cobertura del Sistema
+| Método | R² | Error medio (t/ha) | RMSE (t/ha) |
+|--------|----|--------------------|-------------|
+| **Modelo AgroIA** | **0,897** | 1,45 | **5,22** |
+| Repetir el año anterior | 0,889 | 1,41 | 5,40 |
+| Promedio histórico del municipio | 0,854 | 2,42 | 6,17 |
+
+- Error relativo mediano: **3,2 %**. El rango probable del 90 % contuvo el valor real en el **89,8 %** de los casos.
+- Muchos municipios reportan el mismo rendimiento varios años seguidos; por eso "repetir el año anterior" es una referencia muy exigente en error medio. El modelo reduce los errores grandes y aporta rango y escenarios.
+- Con 6 años de producción (2019–2024) el efecto de El Niño / La Niña sobre el rendimiento es pequeño y poco identificable.
+- Detalles: [docs/modelo_pronostico.md](docs/modelo_pronostico.md).
+
+### Cobertura del Sistema (base de datos desplegada)
 
 | Indicador | Valor |
 |-----------|-------|
-| Estaciones climáticas IDEAM | **991** |
-| Municipios cubiertos | **> 1.100** |
-| Cultivos analizados | **> 50** |
-| Período de producción | **2007–2025** |
-| Período de clima | **2018–2026** |
-| Tablas en base de datos | **18** |
+| Municipios con pronóstico | **1.102** |
+| Cultivos | **163** |
+| Combinaciones municipio × cultivo | **17.464** |
+| Período de producción cargado | **2019–2024** |
+| Años pronosticados | **2025–2027** (escenarios Neutral / El Niño / La Niña) |
 
 ### Resultados ANOVA
 
@@ -155,11 +161,10 @@ Todas las **4 pruebas ANOVA** arrojaron **p < 0.001**, confirmando con evidencia
 
 ## 🧠 Interpretación
 
-- **El modelo XGBoost** identifica la lluvia acumulada anual, la temperatura y la aptitud del suelo como los predictores más determinantes del rendimiento agrícola.
-- Los **lags temporales** capturan efectos de largo plazo en cultivos permanentes (café, plátano, palma), donde las condiciones climáticas de años anteriores impactan la cosecha actual.
-- Los **valores SHAP** permiten explicar cada predicción individual: el sistema puede indicar, por ejemplo, que "el déficit hídrico registrado durante El Niño 2024 redujo el rendimiento predicho en 0.3 t/ha para el maíz en Córdoba".
-- El **análisis ANOVA** confirma científicamente que los datos justifican tratar por separado cada fase ENSO, región natural y semestre del año al modelar el rendimiento.
-- Durante **años El Niño**, el modelo anticipa caídas de rendimiento de hasta 25% en cultivos transitorios de las regiones Andina y Caribe.
+- Lo que más pesa en el pronóstico es la historia del propio municipio (rendimiento del año anterior y promedio) y el rendimiento típico del cultivo en el país y el departamento.
+- Cada pronóstico se acompaña de las contribuciones de sus factores (equivalentes a SHAP) respecto a su punto de partida.
+- El **análisis ANOVA** confirma que la lluvia difiere según la fase ENSO, la época del año y la región.
+- **Corrección de datos (2026-09):** el cargue original sumaba el rendimiento de los semestres A y B, inflando el 36 % de los registros. El pronóstico usa producción ÷ área cosechada y `load/load_facts.py` quedó corregido.
 
 ---
 

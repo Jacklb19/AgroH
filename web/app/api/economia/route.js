@@ -1,128 +1,98 @@
 import pool from "@/lib/db";
+import { titulo, errorBD } from "@/lib/modelo";
 
-/* Sección Economía: precios mayoristas (SIPSA) + precios de insumos (IPIA).
-   El esquema de la BD desplegada puede diferir del schema.sql del repo
-   (columnas opcionales como volumen o unidad), así que el SELECT se adapta
-   a las columnas realmente existentes vía information_schema. */
+/* Revalida cada hora: evita que la respuesta quede congelada en el build. */
+export const revalidate = 3600;
 
-const KPIS_VACIOS = {
-  productos_monitoreados: 0,
-  centrales_abastos:      0,
-  insumos_monitoreados:   0,
-  registros_insumos:      0,
+/* Precios e insumos:
+   - Índice de precios de insumos agrícolas (IPIA, datos.gov.co y5zy-x4ky). Los
+     valores son un ÍNDICE (no pesos): se presentan como tal.
+   - Precios mayoristas SIPSA (COP/kg) del último mes disponible. */
+
+const NOMBRES = {
+  urea_46: "Urea 46 %", urea_sulfato: "Urea + sulfato", dap_18_46: "DAP 18-46", kcl_0_0_60: "Cloruro de potasio 0-0-60",
+  sam: "Sulfato de amonio", _2_4_d: "2,4-D", _2_4_d_picloram: "2,4-D + picloram", aminopiralid_2_4_d: "Aminopiralid + 2,4-D",
 };
 
-async function safeQuery(sql, errores, etiqueta) {
-  try {
-    const { rows } = await pool.query(sql);
-    return rows;
-  } catch (err) {
-    console.error(`[economia:${etiqueta}]`, err.message);
-    errores.push(`${etiqueta}: ${err.message}`);
-    return null;
-  }
-}
+const FERTILIZANTE = /^(_\d+(_\d+)+$|urea|dap|kcl|sam$)/;
 
-async function columnasDe(tabla, errores) {
-  const rows = await safeQuery(`
-    SELECT column_name
-    FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = '${tabla}'
-  `, errores, `columnas_${tabla}`);
-  return new Set((rows || []).map((r) => r.column_name));
+function nombreInsumo(clave) {
+  if (NOMBRES[clave]) return NOMBRES[clave];
+  if (/^_\d+(_\d+)+$/.test(clave)) return `Fertilizante ${clave.slice(1).replace(/_/g, "-")}`;
+  return clave.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ").replace(/ (De|Y) /g, (m) => m.toLowerCase());
 }
 
 export async function GET() {
-  const errores = [];
+  try {
+    const [serie, insumos, mayoristas] = await Promise.all([
+      pool.query(`
+        SELECT t.anio, t.mes,
+               AVG(i.precio_cop_unidad) FILTER (WHERE i.nombre_insumo ~ '^(_[0-9_]+$|urea|dap|kcl|sam$)') AS fertilizantes,
+               AVG(i.precio_cop_unidad) FILTER (WHERE NOT i.nombre_insumo ~ '^(_[0-9_]+$|urea|dap|kcl|sam$)') AS agroquimicos
+        FROM fact_precios_insumos i JOIN dim_tiempo t ON t.id_tiempo = i.id_tiempo
+        GROUP BY t.anio, t.mes ORDER BY t.anio, t.mes
+      `),
+      pool.query(`
+        WITH s AS (
+          SELECT i.nombre_insumo, t.fecha, AVG(i.precio_cop_unidad) AS v
+          FROM fact_precios_insumos i JOIN dim_tiempo t ON t.id_tiempo = i.id_tiempo
+          GROUP BY 1, 2
+        ), ult AS (SELECT DISTINCT ON (nombre_insumo) nombre_insumo, fecha, v FROM s ORDER BY nombre_insumo, fecha DESC)
+        SELECT u.nombre_insumo, u.fecha, u.v AS actual,
+               (SELECT v FROM s WHERE s.nombre_insumo = u.nombre_insumo AND s.fecha <= u.fecha - INTERVAL '12 months'
+                ORDER BY s.fecha DESC LIMIT 1) AS hace_un_anio,
+               (SELECT MAX(v) FROM s WHERE s.nombre_insumo = u.nombre_insumo) AS maximo
+        FROM ult u
+      `),
+      pool.query(`
+        SELECT c.nombre_cultivo, t.anio, t.nombre_mes,
+               AVG(p.precio_promedio_cop_kg) AS promedio,
+               MIN(p.precio_promedio_cop_kg) AS minimo,
+               MAX(p.precio_promedio_cop_kg) AS maximo,
+               COUNT(DISTINCT p.id_central)::int AS centrales,
+               STRING_AGG(DISTINCT d.ciudad, ', ') AS ciudades
+        FROM fact_precios_mayoristas p
+        JOIN dim_cultivo c ON c.id_cultivo = p.id_cultivo
+        JOIN dim_tiempo t ON t.id_tiempo = p.id_tiempo
+        LEFT JOIN dim_central_abastos d ON d.id_central = p.id_central
+        WHERE p.id_tiempo = (SELECT MAX(id_tiempo) FROM fact_precios_mayoristas)
+        GROUP BY c.nombre_cultivo, t.anio, t.nombre_mes
+        ORDER BY promedio DESC
+      `),
+    ]);
 
-  const [colsMayoristas, colsInsumos] = await Promise.all([
-    columnasDe("fact_precios_mayoristas", errores),
-    columnasDe("fact_precios_insumos", errores),
-  ]);
+    const num = (v, d = 1) => (v == null ? null : +parseFloat(v).toFixed(d));
+    const m0 = mayoristas.rows[0];
 
-  const tieneVolumen = colsMayoristas.has("volumen_abastecimiento_ton");
-  const tieneUnidad  = colsInsumos.has("unidad_medida");
-  const tieneRegion  = colsInsumos.has("id_region");
-
-  const volumenSel = tieneVolumen
-    ? "ROUND(SUM(pm.volumen_abastecimiento_ton)::numeric)"
-    : "NULL";
-  const ordenMayoristas = tieneVolumen
-    ? "volumen_ton DESC NULLS LAST"
-    : "precio_promedio DESC NULLS LAST";
-  const unidadSel = tieneUnidad ? "fi.unidad_medida" : "NULL AS unidad_medida";
-  const regionJoin = tieneRegion
-    ? "LEFT JOIN dim_region_natural r ON r.id_region = fi.id_region"
-    : "";
-  const regionSel = tieneRegion ? "r.nombre_region" : "NULL AS nombre_region";
-
-  const [kpisRows, mayoristasRows, tiposRows, insumosRows] = await Promise.all([
-    safeQuery(`
-      SELECT
-        (SELECT COUNT(DISTINCT id_cultivo)::int    FROM fact_precios_mayoristas) AS productos_monitoreados,
-        (SELECT COUNT(DISTINCT id_central)::int    FROM fact_precios_mayoristas) AS centrales_abastos,
-        (SELECT COUNT(DISTINCT nombre_insumo)::int FROM fact_precios_insumos)    AS insumos_monitoreados,
-        (SELECT COUNT(*)::int                      FROM fact_precios_insumos)    AS registros_insumos
-    `, errores, "kpis"),
-    safeQuery(`
-      SELECT c.nombre_cultivo                                    AS producto,
-             ROUND(MIN(pm.precio_min_cop_kg)::numeric)           AS precio_min,
-             ROUND(AVG(pm.precio_promedio_cop_kg)::numeric)      AS precio_promedio,
-             ROUND(MAX(pm.precio_max_cop_kg)::numeric)           AS precio_max,
-             ${volumenSel}                                       AS volumen_ton,
-             COUNT(DISTINCT pm.id_central)::int                  AS num_centrales
-      FROM fact_precios_mayoristas pm
-      JOIN dim_cultivo c ON c.id_cultivo = pm.id_cultivo
-      GROUP BY c.nombre_cultivo
-      ORDER BY ${ordenMayoristas}
-      LIMIT 30
-    `, errores, "mayoristas"),
-    safeQuery(`
-      SELECT COALESCE(tipo_insumo, 'Sin clasificar') AS tipo,
-             COUNT(*)::int AS total
-      FROM fact_precios_insumos
-      GROUP BY tipo_insumo
-      ORDER BY total DESC
-    `, errores, "tipos"),
-    safeQuery(`
-      SELECT DISTINCT ON (fi.nombre_insumo)
-             fi.nombre_insumo,
-             fi.tipo_insumo,
-             ROUND(fi.precio_cop_unidad::numeric) AS precio,
-             ${unidadSel},
-             ${regionSel},
-             t.anio, t.mes
-      FROM fact_precios_insumos fi
-      LEFT JOIN dim_tiempo t ON t.id_tiempo = fi.id_tiempo
-      ${regionJoin}
-      ORDER BY fi.nombre_insumo, t.anio DESC NULLS LAST, t.mes DESC NULLS LAST
-      LIMIT 80
-    `, errores, "insumos"),
-  ]);
-
-  const fromDB =
-    kpisRows !== null || mayoristasRows !== null || insumosRows !== null;
-
-  return Response.json({
-    fromDB,
-    ...(errores.length > 0 && { errores }),
-    kpis: kpisRows?.[0] || KPIS_VACIOS,
-    mayoristas: (mayoristasRows || []).map((r) => ({
-      producto:        r.producto,
-      precio_min:      r.precio_min      != null ? Number(r.precio_min)      : null,
-      precio_promedio: r.precio_promedio != null ? Number(r.precio_promedio) : null,
-      precio_max:      r.precio_max      != null ? Number(r.precio_max)      : null,
-      volumen_ton:     r.volumen_ton     != null ? Number(r.volumen_ton)     : null,
-      num_centrales:   r.num_centrales,
-    })),
-    insumos: (insumosRows || []).map((r) => ({
-      nombre:  r.nombre_insumo,
-      tipo:    r.tipo_insumo || "Sin clasificar",
-      precio:  r.precio != null ? Number(r.precio) : null,
-      unidad:  r.unidad_medida || "",
-      region:  r.nombre_region || null,
-      periodo: r.anio ? `${r.anio}-${String(r.mes).padStart(2, "0")}` : null,
-    })),
-    tipos_insumo: tiposRows || [],
-  });
+    return Response.json({
+      fromDB: true,
+      indice: serie.rows.map((r) => ({
+        periodo: `${r.anio}-${String(r.mes).padStart(2, "0")}`,
+        anio: r.anio, mes: r.mes,
+        fertilizantes: num(r.fertilizantes), agroquimicos: num(r.agroquimicos),
+      })),
+      insumos: insumos.rows
+        .map((r) => ({
+          clave: r.nombre_insumo,
+          nombre: nombreInsumo(r.nombre_insumo),
+          grupo: FERTILIZANTE.test(r.nombre_insumo) ? "Fertilizantes" : "Agroquímicos",
+          actual: num(r.actual),
+          cambio_12m: r.hace_un_anio ? num(((r.actual - r.hace_un_anio) / r.hace_un_anio) * 100) : null,
+          desde_maximo: r.maximo ? num(((r.actual - r.maximo) / r.maximo) * 100) : null,
+          fecha: r.fecha,
+        }))
+        .sort((a, b) => a.grupo.localeCompare(b.grupo) || a.nombre.localeCompare(b.nombre, "es")),
+      mayoristas: {
+        periodo: m0 ? `${m0.nombre_mes} de ${m0.anio}` : null,
+        ciudades: [...new Set(mayoristas.rows.flatMap((r) => (r.ciudades || "").split(", ")).filter(Boolean))].map(titulo),
+        productos: mayoristas.rows.map((r) => ({
+          producto: r.nombre_cultivo,
+          promedio: num(r.promedio, 0), minimo: num(r.minimo, 0), maximo: num(r.maximo, 0),
+          centrales: r.centrales,
+        })),
+      },
+    });
+  } catch (err) {
+    return errorBD("economia", err);
+  }
 }

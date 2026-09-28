@@ -21,6 +21,7 @@ export async function POST(request) {
     temp_delta_c     = 0,
     enso             = "Neutral",
     fertilizante_pct = 0,
+    baseline: baselineCliente = null,   // opcional: predicción ya mostrada al usuario
   } = body;
 
   const nombreMuni = (muni || "").split(",")[0].trim();
@@ -51,12 +52,15 @@ export async function POST(request) {
     console.error("[simular]", err.message);
   }
 
-  const base       = baseline ?? 4.4;
+  /* Si el cliente envía su predicción, esa es la base; la aptitud del suelo
+     ya está incorporada en ella y no se vuelve a sumar. */
+  const usaCliente = baselineCliente !== null && Number.isFinite(Number(baselineCliente));
+  const base       = usaCliente ? Number(baselineCliente) : baseline ?? 4.4;
   const lluviaImp  = ELASTICIDADES.lluvia_pct       * Number(lluvia_pct || 0)       * base;
   const tempImp    = ELASTICIDADES.temp_delta_c     * Number(temp_delta_c || 0);
   const ensoImp    = ELASTICIDADES.enso[enso] ?? 0;
   const fertImp    = Math.tanh(Number(fertilizante_pct || 0) / 100) * ELASTICIDADES.fertilizante_pct * 100; // saturante
-  const aptImp     = aptitud ? (ELASTICIDADES.aptitud[aptitud] || 0) : 0;
+  const aptImp     = !usaCliente && aptitud ? (ELASTICIDADES.aptitud[aptitud] || 0) : 0;
 
   const proyectado = +(base + lluviaImp + tempImp + ensoImp + fertImp + aptImp).toFixed(2);
   const delta      = +(proyectado - base).toFixed(2);

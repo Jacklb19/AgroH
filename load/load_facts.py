@@ -56,8 +56,18 @@ def load_all_facts(engine, df_produccion: pd.DataFrame, df_boletines: pd.DataFra
     for col in ["area_sembrada_ha", "area_cosechada_ha", "produccion_total_ton", "rendimiento_t_ha"]:
         df_fact[col] = pd.to_numeric(df_fact[col], errors='coerce').fillna(0)
         
-    # Agrupar por llaves primarias en caso de duplicados en la fuente
-    df_fact = df_fact.groupby(["id_municipio", "id_cultivo", "id_tiempo", "fuente_origen"]).sum().reset_index()
+    # Agrupar por llaves primarias: la fuente trae varias filas por municipio×cultivo×año
+    # (semestres A/B y variedades). Áreas y producción se suman; el rendimiento NO se
+    # suma (daba valores inflados): se recalcula como producción ÷ área cosechada.
+    df_fact = (
+        df_fact.drop(columns="rendimiento_t_ha")
+        .groupby(["id_municipio", "id_cultivo", "id_tiempo", "fuente_origen"]).sum()
+        .reset_index()
+    )
+    calculable = (df_fact["area_cosechada_ha"] > 0) & (df_fact["produccion_total_ton"] > 0)
+    df_fact["rendimiento_t_ha"] = (
+        df_fact["produccion_total_ton"] / df_fact["area_cosechada_ha"]
+    ).where(calculable)
 
     # 4. Upsert a fact_produccion_agricola
     upsert(engine, "fact_produccion_agricola", df_fact, ["id_municipio", "id_cultivo", "id_tiempo"])

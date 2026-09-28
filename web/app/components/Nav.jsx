@@ -1,77 +1,72 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Icon } from "./icons";
 
-const LINKS = [
-  { id: "inicio",      label: "Inicio" },
-  { id: "dashboards",  label: "Dashboards" },
-  { id: "prediccion",  label: "Predicción" },
-  { id: "asistente",   label: "Asistente IA" },
-  { id: "impacto",     label: "Impacto" },
-  { id: "metodologia", label: "Metodología" },
+export const LINKS = [
+  { href: "/",            label: "Inicio" },
+  { href: "/prediccion",  label: "Predicción" },
+  { href: "/datos",       label: "Explorar datos" },
+  { href: "/asistente",   label: "Asistente" },
+  { href: "/metodologia", label: "Cómo funciona" },
 ];
 
-export default function Nav({ active, onNav }) {
+export default function Nav() {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
-  const navigate = (id) => {
-    onNav(id);
-    setOpen(false);
-  };
+  useEffect(() => { setOpen(false); }, [pathname]);
+
+  const isActive = (href) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
   return (
     <header className="nav">
       <div className="container nav-inner">
-        <div className="brand">
-          <div className="brand-mark">A</div>
-          <div className="brand-text">
+        <Link href="/" className="brand" aria-label="AgroIA Colombia, inicio">
+          <span className="brand-mark"><Icon.sprout size={20} /></span>
+          <span className="brand-text">
             <strong>AgroIA Colombia</strong>
-            <span>Inteligencia Agro-Climática</span>
-          </div>
-        </div>
+            <span>Inteligencia agroclimática</span>
+          </span>
+        </Link>
 
-        <nav className="nav-links">
+        <nav className="nav-links" aria-label="Principal">
           {LINKS.map((l) => (
-            <button
-              key={l.id}
-              className={`nav-link ${active === l.id ? "active" : ""}`}
-              onClick={() => onNav(l.id)}
+            <Link
+              key={l.href}
+              href={l.href}
+              className={`nav-link ${isActive(l.href) ? "active" : ""}`}
+              aria-current={isActive(l.href) ? "page" : undefined}
             >
               {l.label}
-            </button>
+            </Link>
           ))}
         </nav>
 
-        <button className="nav-cta" onClick={() => onNav("prediccion")}>
-          Consultar Predicción <Icon.arrow className="arrow" />
-        </button>
+        <Link href="/prediccion" className="nav-cta">
+          Probar predicción <Icon.arrow className="arrow" />
+        </Link>
 
         <button
           className={`nav-hamburger ${open ? "open" : ""}`}
           onClick={() => setOpen(!open)}
-          aria-label="Menú"
+          aria-label={open ? "Cerrar menú" : "Abrir menú"}
+          aria-expanded={open}
         >
-          <span />
-          <span />
-          <span />
+          <span /><span /><span />
         </button>
       </div>
 
       {open && (
-        <div className="nav-mobile">
+        <nav className="nav-mobile" aria-label="Principal móvil">
           {LINKS.map((l) => (
-            <button
-              key={l.id}
-              className={`nav-mobile-link ${active === l.id ? "active" : ""}`}
-              onClick={() => navigate(l.id)}
-            >
+            <Link key={l.href} href={l.href} className={`nav-mobile-link ${isActive(l.href) ? "active" : ""}`}>
               {l.label}
-            </button>
+            </Link>
           ))}
-          <button className="nav-mobile-cta" onClick={() => navigate("prediccion")}>
-            Consultar Predicción
-          </button>
-        </div>
+          <Link href="/prediccion" className="nav-mobile-cta">Probar predicción</Link>
+        </nav>
       )}
     </header>
   );
